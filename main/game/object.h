@@ -1,0 +1,119 @@
+#ifndef OBJECT_H
+#define OBJECT_H
+
+#include <stdint.h>
+#include <stdbool.h>
+
+#include "image.h"
+#include "spaceship.h"
+#include "projectile.h"
+#include "impact.h"
+#include "pickup.h"
+
+typedef enum {
+    DIRECTION_UP,
+    DIRECTION_DOWN,
+    DIRECTION_LEFT,
+    DIRECTION_RIGHT,
+} direction_t;
+
+typedef struct {
+    bool active;
+    float px;
+    float py;
+    float vi;
+    float vj;
+    spaceship_mode_t mode;
+    uint8_t life;
+    uint16_t collision_countdown;
+    bool collision_active;
+    uint16_t ammunitions[4]; 
+    bool shield_active;
+    uint8_t shield_animation_number;
+    uint32_t alive_timer;
+    uint16_t asteroids_counter;
+} spaceship_control_t;
+
+typedef struct {
+    bool active;
+    float px;
+    float py;
+    impact_type_t type;
+    impact_size_t size;
+    uint8_t animation_number;
+    uint32_t animation_countdown;
+} impact_control_t;
+
+typedef struct {
+    bool active;
+    float px;
+    float py;
+    float vi;
+    float vj;
+    uint8_t owner;
+    projectile_type_t type;
+    uint8_t animation_number;
+    uint32_t animation_countdown;
+} projectile_control_t;
+
+typedef struct {
+    bool active;
+    float px;
+    float py;
+    float vi;
+    float vj;
+    uint8_t number;
+    image_orientation_t orientation;
+    uint8_t life;
+    uint32_t damage_countdown;
+    bool damage_active;
+} asteroid_control_t;
+
+typedef struct {
+    bool active;
+    float px;
+    float py;
+    float vi;
+    float vj;
+    pickup_type_t type;
+    float trajectory_progress;
+} pickup_control_t;
+
+typedef struct {
+    bool active;
+    float px;
+    float py;
+    float vi;
+    float vj;
+    direction_t direction;
+    uint8_t animation_number;
+    uint32_t animation_countdown;
+    bool arrow_active;
+    uint32_t arrow_countdown;
+    float arrow_progress;
+} meteor_control_t;
+
+typedef struct {
+    uint8_t current_player;
+    uint32_t play_timer;
+    
+    spaceship_control_t*   spaceships;
+    size_t                 spaceships_length;
+    
+    asteroid_control_t*    asteroids;
+    size_t                 asteroids_length;
+    
+    impact_control_t*      impacts;
+    size_t                 impacts_length;
+    
+    projectile_control_t*  projectiles;
+    size_t                 projectiles_length;
+    
+    pickup_control_t*      pickups;
+    size_t                 pickups_length;
+    
+    meteor_control_t*      meteors;
+    size_t                 meteors_length;
+} game_state_t;
+
+#endif
