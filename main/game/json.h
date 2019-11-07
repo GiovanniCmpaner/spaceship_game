@@ -1,9 +1,9 @@
 #ifndef GAME_JSON_H
 #define GAME_JSON_H
 
-void json_game_from_server( const char* str, game_state_t* game_state );
-size_t json_game_to_client( char** str, const game_state_t* game_state );
-void json_game_from_client( const char* str, game_state_t* game_state );
-void json_game_to_server( char** str, const game_state_t* game_state );
+void json_game_from_server( game_state_t* game_state, const char* buffer, size_t length );
+size_t json_game_to_client( const game_state_t* game_state, char* buffer, size_t length );
+void json_game_from_client( game_state_t* game_state, const char* buffer, size_t length );
+void json_game_to_server  ( const game_state_t* game_state, char* buffer, size_t length );
 
 #endif

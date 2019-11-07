@@ -1977,7 +1977,7 @@ static const character_t character104 = {
 static const character_t character105 = {
     'i',                      
     20,                       
-    8,                        
+    12,                        
     {                         
         _ _ _ _ X X X _ _ _ _ _
         _ _ _ _ X X X _ _ _ _ _
@@ -2058,10 +2058,10 @@ static const character_t character107 = {
 static const character_t character108 = {
     'l',                      
     20,                       
-    8,                        
+    12,                        
     {                         
-        X X X X X X X _ _ _ _ _
-        X X X X X X X _ _ _ _ _
+        _ X X X X X X _ _ _ _ _
+        _ X X X X X X _ _ _ _ _
         _ _ _ _ X X X _ _ _ _ _
         _ _ _ _ X X X _ _ _ _ _
         _ _ _ _ X X X _ _ _ _ _

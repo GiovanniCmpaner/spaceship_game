@@ -13,6 +13,7 @@ extern const audio_t audio_cursor_move;
 
 void audio_initialize();
 void audio_play(const audio_t* audio);
-void audio_set_volume(double percentage);
+void audio_set_volume( uint8_t new_percentage );
+uint8_t audio_get_volume();
 
 #endif

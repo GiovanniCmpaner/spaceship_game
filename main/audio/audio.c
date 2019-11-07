@@ -17,12 +17,12 @@
 //-----------------------------------------------------------------------------
 void audio_initialize();
 void audio_play(const audio_t* audio);
-void audio_set_volume(double percentage);
 
 static void audio_process();
-static void audio_apply_volume(uint8_t* buffer, size_t length);
 //-----------------------------------------------------------------------------
 static const char* tag = "audio";
+static uint8_t volume_percentage = 10;
+
 
 static QueueHandle_t audio_queue = NULL;
 //-----------------------------------------------------------------------------
@@ -48,13 +48,6 @@ void audio_initialize(){
     xTaskCreatePinnedToCore(audio_process, "audio_process", 3072, NULL, 1, NULL, 0);
 }
 //-----------------------------------------------------------------------------
-static void audio_apply_volume( uint8_t* buffer, size_t buffer_length ){
-    while(buffer_length--){
-        *buffer *= 0.1;
-        buffer++;
-    }
-}
-//-----------------------------------------------------------------------------
 static void audio_process(){
     const size_t write_buffer_length = 8184; // Tamanho maximo do buffer DMA usado pelo I2S
     uint8_t* const write_buffer = pvPortMalloc(write_buffer_length); // Aloca o buffer
@@ -74,7 +67,7 @@ static void audio_process(){
             const size_t write_block_length = ( write_buffer_length / 2 ) < ( audio->length - data_pos ) ? ( write_buffer_length / 2 ) : ( audio->length - data_pos );
             
             for(uint32_t n = 0; n < write_block_length; n++){
-                write_buffer[n * 2 + 1] = audio->data[data_pos] * 0.3;
+                write_buffer[n * 2 + 1] = ( audio->data[data_pos] * volume_percentage ) / 100;
                 data_pos++;
             }
 
@@ -101,5 +94,18 @@ void audio_play(const audio_t* audio){
     if(audio_queue != NULL){
         xQueueOverwrite( audio_queue, &audio );    
     }
+}
+//-----------------------------------------------------------------------------
+void audio_set_volume( uint8_t new_percentage )
+{
+    if( new_percentage > 100 ){
+        new_percentage = 100;
+    }
+    volume_percentage = new_percentage;
+}
+//-----------------------------------------------------------------------------
+uint8_t audio_get_volume()
+{
+    return volume_percentage;
 }
 //-----------------------------------------------------------------------------

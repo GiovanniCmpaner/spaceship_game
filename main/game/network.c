@@ -145,11 +145,10 @@ static void network_process_tcp_client(void *pvParameters)
     vTaskDelete(NULL);
 }
 //-----------------------------------------------------------------------------------------
+static char buffer[15000];
+
 static void network_process_tcp_server(void *pvParameters)
 {
-    
-    char rx_buffer[128];
-
     const struct sockaddr_in destAddr = {
         .sin_addr.s_addr = htonl(INADDR_ANY),
         .sin_family = AF_INET,
@@ -178,6 +177,11 @@ static void network_process_tcp_server(void *pvParameters)
     ESP_LOGI(TAG, "Socket listening");
     
     while(1){
+
+        game_state_t* game_state;
+        if( xTaskNotifyWait( 0, ULONG_MAX, (uint32_t*)&game_state, portMAX_DELAY ) ){
+            const size_t length = json_game_to_client( game_state, buffer, sizeof( buffer ) );
+        }
         
         //char* str = NULL;
         //size_t len = 0;
@@ -422,7 +426,6 @@ void network_sync( game_state_t* game_state )
     if( network_task_handle != NULL )
     {
         xTaskNotify( network_task_handle, (uint32_t)game_state, eSetValueWithOverwrite );
-        vTaskDelay( portMAX_DELAY );
     }
 }
 //-----------------------------------------------------------------------------------------

@@ -469,25 +469,25 @@ static void game_move_meteors( uint32_t milliseconds ){
         }
 
         if( meteor_control->arrow_active ){
-            meteor_control->arrow_progress += 1.5;
-            
-            if( meteor_control->direction == DIRECTION_DOWN || meteor_control->direction == DIRECTION_UP ){
-                const image_t* arrow_image = image_arrow[ IMAGE_ROTATED_0 ];
-                
-                if( meteor_control->arrow_progress > arrow_image->width ){
-                    meteor_control->arrow_progress = 0.0;
-                }
-            }
-            else if( meteor_control->direction == DIRECTION_LEFT || meteor_control->direction == DIRECTION_RIGHT ){
-                const image_t* arrow_image = image_arrow[ IMAGE_ROTATED_90 ];
-                
-                if( meteor_control->arrow_progress > arrow_image->height ){
-                    meteor_control->arrow_progress = 0.0;
-                }
-            }
-
             if( meteor_control->arrow_countdown > milliseconds ){
                 meteor_control->arrow_countdown -= milliseconds;
+
+                meteor_control->arrow_progress += 1.5;
+                
+                if( meteor_control->direction == DIRECTION_DOWN || meteor_control->direction == DIRECTION_UP ){
+                    const image_t* arrow_image = image_arrow[ IMAGE_ROTATED_0 ];
+                    
+                    if( meteor_control->arrow_progress > arrow_image->width ){
+                        meteor_control->arrow_progress = 0.0;
+                    }
+                }
+                else if( meteor_control->direction == DIRECTION_LEFT || meteor_control->direction == DIRECTION_RIGHT ){
+                    const image_t* arrow_image = image_arrow[ IMAGE_ROTATED_90 ];
+                    
+                    if( meteor_control->arrow_progress > arrow_image->height ){
+                        meteor_control->arrow_progress = 0.0;
+                    }
+                }
             }
             else {
                 meteor_control->arrow_active = false;

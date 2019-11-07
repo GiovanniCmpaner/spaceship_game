@@ -23,7 +23,8 @@ typedef struct {
     float py;
     float vi;
     float vj;
-    spaceship_mode_t mode;
+    //spaceship_mode_t mode;
+    uint8_t mode;
     uint8_t life;
     uint16_t collision_countdown;
     bool collision_active;
@@ -38,8 +39,10 @@ typedef struct {
     bool active;
     float px;
     float py;
-    impact_type_t type;
-    impact_size_t size;
+    //impact_type_t type;
+    uint8_t type;
+    //impact_size_t size;
+    uint8_t size;
     uint8_t animation_number;
     uint32_t animation_countdown;
 } impact_control_t;
@@ -51,7 +54,8 @@ typedef struct {
     float vi;
     float vj;
     uint8_t owner;
-    projectile_type_t type;
+    //projectile_type_t type;
+    uint8_t type;
     uint8_t animation_number;
     uint32_t animation_countdown;
 } projectile_control_t;
@@ -63,7 +67,8 @@ typedef struct {
     float vi;
     float vj;
     uint8_t number;
-    image_orientation_t orientation;
+    //image_orientation_t orientation;
+    uint8_t orientation;
     uint8_t life;
     uint32_t damage_countdown;
     bool damage_active;
@@ -75,7 +80,8 @@ typedef struct {
     float py;
     float vi;
     float vj;
-    pickup_type_t type;
+    //pickup_type_t type;
+    uint8_t type;
     float trajectory_progress;
 } pickup_control_t;
 
@@ -85,7 +91,8 @@ typedef struct {
     float py;
     float vi;
     float vj;
-    direction_t direction;
+    //direction_t direction;
+    uint8_t direction;
     uint8_t animation_number;
     uint32_t animation_countdown;
     bool arrow_active;
