@@ -22,7 +22,6 @@ uint16_t lcd_width();
 uint16_t lcd_height();
 
 void lcd_draw_image( int16_t x, int16_t y, const image_t* image );
-void lcd_draw_image_orientation( int16_t x, int16_t y, const image_t* image, image_orientation_t orientation );
 void lcd_draw_image_orientation_print( const char* name, const image_t* image, image_orientation_t orientation );
 void lcd_draw_pixel( int16_t x, int16_t y, color_t color);
 void lcd_draw_line( int16_t x0, int16_t y0, int16_t x1, int16_t y1, color_t color );

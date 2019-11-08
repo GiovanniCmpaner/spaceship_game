@@ -12,6 +12,7 @@
 #include "esp_event_loop.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
+#include "rom/crc.h"
 
 #include "lwip/err.h"
 #include "lwip/sockets.h"
@@ -32,7 +33,6 @@
 #define PORT 5000
 //-----------------------------------------------------------------------------------------
 static const char* TAG = "network";
-static const char *payload = "Message from ESP32 ";
 
 const int IPV4_GOTIP_BIT = BIT0;
 const int IPV6_GOTIP_BIT = BIT1;
@@ -85,9 +85,6 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
 //-----------------------------------------------------------------------------------------
 static void network_process_tcp_client(void *pvParameters)
 {
-    
-    char rx_buffer[128];
-    
     const struct sockaddr_in destAddr = {
         .sin_addr.s_addr = inet_addr(HOST_IP_ADDR),
         .sin_family = AF_INET,
@@ -146,6 +143,15 @@ static void network_process_tcp_client(void *pvParameters)
 }
 //-----------------------------------------------------------------------------------------
 static char buffer[15000];
+static size_t position = 0;
+
+typedef enum {
+    RECEIVING_START,
+    RECEIVING_LENGTH,
+    RECEIVING_CRC,
+    RECEIVING_DATA,
+    RECEIVING_END
+} state_t;
 
 static void network_process_tcp_server(void *pvParameters)
 {
@@ -178,11 +184,135 @@ static void network_process_tcp_server(void *pvParameters)
     
     while(1){
 
-        game_state_t* game_state;
-        if( xTaskNotifyWait( 0, ULONG_MAX, (uint32_t*)&game_state, portMAX_DELAY ) ){
-            const size_t length = json_game_to_client( game_state, buffer, sizeof( buffer ) );
+        struct sockaddr_in6 sourceAddr;
+        uint addrLen = sizeof(sourceAddr);
+        const int client_sock = lwip_accept(server_sock, (struct sockaddr *)&sourceAddr, &addrLen);
+        if (client_sock < 0) {
+            ESP_LOGE(TAG, "Unable to accept connection: errno %d", errno);
+            break;
         }
+        ESP_LOGI(TAG, "Socket accepted");
         
+        while(1){
+            static state_t  state = RECEIVING_START;
+            static bool     valid = false;
+
+            static uint8_t  start;
+            static uint16_t length;
+            static uint32_t crc;
+            static uint8_t  end;
+        
+            if( state == RECEIVING_START ){
+                const int err = lwip_recv( client_sock, &buffer[ position ], sizeof( start ) - position, MSG_DONTWAIT );
+                if( err < 0 ){
+                    ESP_LOGE( TAG, "recv failed: errno %d", errno );
+                    break;
+                }
+                position += err;
+                if( position >= sizeof( start ) ){
+                    start = *buffer;
+                    position = 0;
+                    if( start == '\x02' ){
+                        valid = false;
+                        state = RECEIVING_LENGTH;
+                    }
+                }
+            }
+            else if( state == RECEIVING_LENGTH ){
+                const int err = lwip_recv( client_sock, &buffer[ position ], sizeof( length ) - position, MSG_DONTWAIT );
+                if( err < 0 ){
+                    ESP_LOGE( TAG, "recv failed: errno %d", errno );
+                    break;
+                }
+                position += err;
+                if( position >= sizeof( length ) ){
+                    length = *(uint16_t*)buffer;
+                    position = 0;
+                    state = RECEIVING_CRC;
+                }
+            }
+            else if( state == RECEIVING_CRC ){
+                const int err = lwip_recv( client_sock, &buffer[ position ], sizeof( crc ) - position, MSG_DONTWAIT );
+                if( err < 0 ){
+                    ESP_LOGE( TAG, "recv failed: errno %d", errno );
+                    break;
+                }
+                position += err;
+                if( position >= sizeof( crc ) ){
+                    crc = *(uint32_t*)buffer;
+                    position = 0;
+                    state = RECEIVING_DATA;
+                }
+            }
+            else if( state == RECEIVING_DATA ){
+                const int err = lwip_recv( client_sock, &buffer[ position ], length - position, MSG_DONTWAIT );
+                if( err < 0 ){
+                    ESP_LOGE( TAG, "recv failed: errno %d", errno );
+                    break;
+                }
+                position += err;
+                if( position >= length ){
+                    position = 0;
+                    state = RECEIVING_END;
+                }
+            }
+            else if( state == RECEIVING_END ){
+                const int err = lwip_recv( client_sock, &buffer[ position ], length + 1 - position, MSG_DONTWAIT );
+                if( err < 0 ){
+                    ESP_LOGE( TAG, "recv failed: errno %d", errno );
+                    break;
+                }
+                position += err;
+                if( position >= length + sizeof( end ) ){
+                    end = *( buffer + length );
+                    position = 0;
+                    if(end == '\x03'){
+                        const uint32_t crc_calculated = crc32_be( 0, (const uint8_t*)&buffer[7], length );
+                        if( crc == crc_calculated ){
+                            valid = true;
+                        }
+                        else {
+                            position = 0;
+                        }
+                    }
+                    state = RECEIVING_START;
+                }
+            }
+            game_state_t* game_state;
+            if( xTaskNotifyWait( 0, ULONG_MAX, (uint32_t*)&game_state, 0 ) )
+            { 
+                if( valid ){
+                    json_game_from_client( game_state, buffer, position ); // Checa as regras -> munições / movimento
+                    position = 0;
+                    valid = false;
+                }
+                {
+                    const size_t length = json_game_to_client( game_state, &buffer[7], sizeof( buffer ) - 8 );
+
+                    char* ptr = buffer;
+                    
+                    *(uint8_t*)ptr = '\x02';
+                    ptr += sizeof( uint8_t );
+                    
+                    *(uint16_t*)ptr = length;
+                    ptr += sizeof( uint16_t );
+                    
+                    *(uint32_t*)ptr = crc32_be( 0, (const uint8_t*)&buffer[7], length );
+                    ptr += sizeof( uint32_t );
+
+                    ptr += length;
+                    
+                    *(uint8_t*)ptr = '\x03';
+                    
+                    int err = lwip_send( client_sock, buffer, length + 8, 0 );
+                    if (err < 0) {
+                        ESP_LOGE(TAG, "Error occured during sending: errno %d", errno);
+                        break;
+                    }
+                }
+            }
+        }
+
         //char* str = NULL;
         //size_t len = 0;
         //{
@@ -268,14 +398,6 @@ static void network_process_tcp_server(void *pvParameters)
         //    }
         //}
 
-        //struct sockaddr_in6 sourceAddr;
-        //uint addrLen = sizeof(sourceAddr);
-        //const int client_sock = lwip_accept(server_sock, (struct sockaddr *)&sourceAddr, &addrLen);
-        //if (client_sock < 0) {
-        //    ESP_LOGE(TAG, "Unable to accept connection: errno %d", errno);
-        //    break;
-        //}
-        //ESP_LOGI(TAG, "Socket accepted");
         //
         //while (1) {
         //
@@ -355,7 +477,6 @@ static void network_initialize_common()
 //-----------------------------------------------------------------------------------------
 static void network_initialize_client( network_type_t type )
 {
-    
     wifi_config_t wifi_config = {
         .sta = {
             .ssid = EXAMPLE_WIFI_SSID,
@@ -374,7 +495,7 @@ static void network_initialize_client( network_type_t type )
     }
     else if( type == NETWORK_UDP )
     {
-        
+        //xTaskCreatePinnedToCore( network_process_udp_client, "network_process_udp_client", 4096, NULL, 5, &network_task_handle, 0 );
     }
 }
 //-----------------------------------------------------------------------------------------

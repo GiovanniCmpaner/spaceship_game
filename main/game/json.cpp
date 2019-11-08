@@ -321,7 +321,6 @@ void json_game_from_server( game_state_t* game_state, const char* buffer, size_t
     json_projectiles_from_server( game_json, game_state );
     json_pickups_from_server    ( game_json, game_state );
     json_meteors_from_server    ( game_json, game_state );
-
 }
 
 
