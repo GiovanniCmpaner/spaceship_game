@@ -104,23 +104,12 @@ typedef struct {
     uint8_t current_player;
     uint32_t play_timer;
     
-    spaceship_control_t*   spaceships;
-    size_t                 spaceships_length;
-    
-    asteroid_control_t*    asteroids;
-    size_t                 asteroids_length;
-    
-    impact_control_t*      impacts;
-    size_t                 impacts_length;
-    
-    projectile_control_t*  projectiles;
-    size_t                 projectiles_length;
-    
-    pickup_control_t*      pickups;
-    size_t                 pickups_length;
-    
-    meteor_control_t*      meteors;
-    size_t                 meteors_length;
+    spaceship_control_t  spaceships [2];
+    asteroid_control_t   asteroids  [20];
+    impact_control_t     impacts    [15];
+    projectile_control_t projectiles[50];
+    pickup_control_t     pickups    [5];
+    meteor_control_t     meteors    [5];
 } game_state_t;
 
 #endif

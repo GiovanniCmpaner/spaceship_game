@@ -5,19 +5,25 @@ using namespace ArduinoJson;
 extern "C" {
     #include <stdio.h>
     #include <stdlib.h>
+    
+    #include "esp_err.h"
+    #include "esp_log.h"
+    
     #include "object.h"
-    #include "json.h"
+    #include "protocol.h"
+    
+    static const char* TAG = "protocol";
 };
 
 //{---------------------------------------------------------------------------------------------------------------------------------
-static void json_spaceships_from_server( ArduinoJson::JsonDocument& game_json, game_state_t* game_state )
+static void protocol_spaceships_from_server( ArduinoJson::JsonDocument& game_json, game_state_t* game_state )
 {
     auto spaceships_json = game_json[ "spaceships" ].as<ArduinoJson::JsonArray>();
 
     for( auto spaceship_n_json : spaceships_json )
     {
         const size_t index = spaceship_n_json[ "index" ];
-        if( index >= game_state->spaceships_length )
+        if( index >= sizeof(game_state->spaceships)/sizeof(*game_state->spaceships) )
         {
             continue;
         }
@@ -37,14 +43,14 @@ static void json_spaceships_from_server( ArduinoJson::JsonDocument& game_json, g
     }
 }
 
-static void json_asteroids_from_server( ArduinoJson::JsonDocument& game_json, game_state_t* game_state )
+static void protocol_asteroids_from_server( ArduinoJson::JsonDocument& game_json, game_state_t* game_state )
 {
     auto asteroids_json = game_json[ "asteroids" ].as<ArduinoJson::JsonArray>();
     
     for( auto asteroid_n_json : asteroids_json )
     {
         const size_t index = asteroid_n_json[ "index" ];
-        if( index >= game_state->asteroids_length )
+        if( index >= sizeof(game_state->asteroids)/sizeof(*game_state->asteroids) )
         {
             continue;
         }
@@ -61,14 +67,14 @@ static void json_asteroids_from_server( ArduinoJson::JsonDocument& game_json, ga
     }
 }
 
-static void json_impacts_from_server( ArduinoJson::JsonDocument& game_json, game_state_t* game_state )
+static void protocol_impacts_from_server( ArduinoJson::JsonDocument& game_json, game_state_t* game_state )
 {
     auto impacts_json = game_json[ "impacts" ].as<ArduinoJson::JsonArray>();
     
     for( auto impact_n_json : impacts_json )
     {
         const size_t index = impact_n_json[ "index" ];
-        if( index >= game_state->impacts_length )
+        if( index >= sizeof(game_state->impacts)/sizeof(*game_state->impacts) )
         {
             continue;
         }
@@ -82,14 +88,14 @@ static void json_impacts_from_server( ArduinoJson::JsonDocument& game_json, game
     }
 }
 
-static void json_projectiles_from_server( ArduinoJson::JsonDocument& game_json, game_state_t* game_state )
+static void protocol_projectiles_from_server( ArduinoJson::JsonDocument& game_json, game_state_t* game_state )
 {
     auto projectiles_json = game_json[ "projectiles" ].as<ArduinoJson::JsonArray>();
     
     for( auto projectile_n_json : projectiles_json )
     {
         const size_t index = projectile_n_json[ "index" ];
-        if( index >= game_state->projectiles_length )
+        if( index >= sizeof(game_state->projectiles)/sizeof(*game_state->projectiles) )
         {
             continue;
         }
@@ -105,14 +111,14 @@ static void json_projectiles_from_server( ArduinoJson::JsonDocument& game_json, 
     }
 }
 
-static void json_pickups_from_server( ArduinoJson::JsonDocument& game_json, game_state_t* game_state )
+static void protocol_pickups_from_server( ArduinoJson::JsonDocument& game_json, game_state_t* game_state )
 {
     auto pickups_json = game_json[ "pickups" ].as<ArduinoJson::JsonArray>();
     
     for( auto pickup_n_json : pickups_json )
     {
         const size_t index = pickup_n_json[ "index" ];
-        if( index >= game_state->pickups_length )
+        if( index >= sizeof(game_state->pickups)/sizeof(*game_state->pickups) )
         {
             continue;
         }
@@ -126,14 +132,14 @@ static void json_pickups_from_server( ArduinoJson::JsonDocument& game_json, game
     }
 }
 
-static void json_meteors_from_server( ArduinoJson::JsonDocument& game_json, game_state_t* game_state )
+static void protocol_meteors_from_server( ArduinoJson::JsonDocument& game_json, game_state_t* game_state )
 {
     auto meteors_json = game_json[ "meteors" ].as<ArduinoJson::JsonArray>();
     
     for( auto meteor_n_json : meteors_json )
     {
         const size_t index = meteor_n_json[ "index" ];
-        if( index >= game_state->meteors_length )
+        if( index >= sizeof(game_state->meteors)/sizeof(*game_state->meteors) )
         {
             continue;
         }
@@ -153,11 +159,11 @@ static void json_meteors_from_server( ArduinoJson::JsonDocument& game_json, game
 //}---------------------------------------------------------------------------------------------------------------------------------
 
 //{---------------------------------------------------------------------------------------------------------------------------------
-static void json_spaceships_to_client( ArduinoJson::JsonDocument& game_json, const game_state_t* game_state )
+static void protocol_spaceships_to_client( ArduinoJson::JsonDocument& game_json, const game_state_t* game_state )
 {
     auto spaceships_json = game_json.createNestedArray( "spaceships" );
 
-    for( size_t index = 0; index < game_state->spaceships_length; index++ )
+    for( size_t index = 0; index < sizeof(game_state->spaceships)/sizeof(*game_state->spaceships); index++ )
     {
         if( not game_state->spaceships[ index ].active )
         {
@@ -182,11 +188,11 @@ static void json_spaceships_to_client( ArduinoJson::JsonDocument& game_json, con
     }
 }
 
-static void json_asteroids_to_client( ArduinoJson::JsonDocument& game_json, const game_state_t* game_state )
+static void protocol_asteroids_to_client( ArduinoJson::JsonDocument& game_json, const game_state_t* game_state )
 {
     auto asteroids_json = game_json.createNestedArray( "asteroids" );
 
-    for( size_t index = 0; index < game_state->asteroids_length; index++ )
+    for( size_t index = 0; index < sizeof(game_state->asteroids)/sizeof(*game_state->asteroids); index++ )
     {
         if( not game_state->asteroids[ index ].active )
         {
@@ -208,11 +214,11 @@ static void json_asteroids_to_client( ArduinoJson::JsonDocument& game_json, cons
     }
 }
 
-static void json_impacts_to_client( ArduinoJson::JsonDocument& game_json, const game_state_t* game_state )
+static void protocol_impacts_to_client( ArduinoJson::JsonDocument& game_json, const game_state_t* game_state )
 {
     auto impacts_json = game_json.createNestedArray( "impacts" );
 
-    for( size_t index = 0; index < game_state->impacts_length; index++ )
+    for( size_t index = 0; index < sizeof(game_state->impacts)/sizeof(*game_state->impacts); index++ )
     {
         if( not game_state->impacts[ index ].active )
         {
@@ -231,11 +237,11 @@ static void json_impacts_to_client( ArduinoJson::JsonDocument& game_json, const 
     }
 }
 
-static void json_projectiles_to_client( ArduinoJson::JsonDocument& game_json, const game_state_t* game_state )
+static void protocol_projectiles_to_client( ArduinoJson::JsonDocument& game_json, const game_state_t* game_state )
 {
     auto projectiles_json = game_json.createNestedArray( "projectiles" );
 
-    for( size_t index = 0; index < game_state->projectiles_length; index++ )
+    for( size_t index = 0; index < sizeof(game_state->projectiles)/sizeof(*game_state->projectiles); index++ )
     {
         if( not game_state->projectiles[ index ].active )
         {
@@ -256,11 +262,11 @@ static void json_projectiles_to_client( ArduinoJson::JsonDocument& game_json, co
     }
 }
 
-static void json_pickups_to_client( ArduinoJson::JsonDocument& game_json, const game_state_t* game_state )
+static void protocol_pickups_to_client( ArduinoJson::JsonDocument& game_json, const game_state_t* game_state )
 {
     auto pickups_json = game_json.createNestedArray( "pickups" );
 
-    for( size_t index = 0; index < game_state->pickups_length; index++ )
+    for( size_t index = 0; index < sizeof(game_state->pickups)/sizeof(*game_state->pickups); index++ )
     {
         if( not game_state->pickups[ index ].active )
         {
@@ -279,11 +285,11 @@ static void json_pickups_to_client( ArduinoJson::JsonDocument& game_json, const 
     }
 }
 
-static void json_meteors_to_client( ArduinoJson::JsonDocument& game_json, const game_state_t* game_state )
+static void protocol_meteors_to_client( ArduinoJson::JsonDocument& game_json, const game_state_t* game_state )
 {
     auto meteors_json = game_json.createNestedArray( "meteors" );
 
-    for( size_t index = 0; index < game_state->meteors_length; index++ )
+    for( size_t index = 0; index < sizeof(game_state->meteors)/sizeof(*game_state->meteors); index++ )
     {
         if( not game_state->meteors[ index ].active )
         {
@@ -309,46 +315,46 @@ static void json_meteors_to_client( ArduinoJson::JsonDocument& game_json, const 
 //{---------------------------------------------------------------------------------------------------------------------------------
 static ArduinoJson::StaticJsonDocument<20000> game_json{ };
 
-void json_game_from_server( game_state_t* game_state, const char* buffer, size_t length )
+void protocol_game_from_server( game_state_t* game_state, const char* buffer, size_t length )
 {
     game_json.clear();
     
     ArduinoJson::deserializeMsgPack( game_json, buffer, length );
 
-    json_spaceships_from_server ( game_json, game_state );
-    json_asteroids_from_server  ( game_json, game_state );
-    json_impacts_from_server    ( game_json, game_state );
-    json_projectiles_from_server( game_json, game_state );
-    json_pickups_from_server    ( game_json, game_state );
-    json_meteors_from_server    ( game_json, game_state );
+    protocol_spaceships_from_server ( game_json, game_state );
+    protocol_asteroids_from_server  ( game_json, game_state );
+    protocol_impacts_from_server    ( game_json, game_state );
+    protocol_projectiles_from_server( game_json, game_state );
+    protocol_pickups_from_server    ( game_json, game_state );
+    protocol_meteors_from_server    ( game_json, game_state );
 }
 
 
 // JSON        -> buffer(char) = 16517 / buffer(json) = 24543 / t = 9736
 // MessagePack -> buffer(char) = 10161 / buffer(json) = 11633 / t = 3915
 
-size_t json_game_to_client( const game_state_t* game_state, char* buffer, size_t length )
+size_t protocol_game_to_client( const game_state_t* game_state, char* buffer, size_t length )
 {
     game_json.clear();
 
-    json_spaceships_to_client ( game_json, game_state );
-    json_asteroids_to_client  ( game_json, game_state );
-    json_impacts_to_client    ( game_json, game_state );
-    json_projectiles_to_client( game_json, game_state );
-    json_pickups_to_client    ( game_json, game_state );
-    json_meteors_to_client    ( game_json, game_state );
+    protocol_spaceships_to_client ( game_json, game_state );
+    protocol_asteroids_to_client  ( game_json, game_state );
+    protocol_impacts_to_client    ( game_json, game_state );
+    protocol_projectiles_to_client( game_json, game_state );
+    protocol_pickups_to_client    ( game_json, game_state );
+    protocol_meteors_to_client    ( game_json, game_state );
 
     return ArduinoJson::serializeMsgPack( game_json, buffer, length );
 }
 
-void json_game_from_client( game_state_t* game_state, const char* buffer, size_t length  )
+void protocol_game_from_client( game_state_t* game_state, const char* buffer, size_t length  )
 {
-
+   
 }
 
-void json_game_to_server( const game_state_t* game_state, char* buffer, size_t length )
+size_t protocol_game_to_server( const game_state_t* game_state, char* buffer, size_t length )
 {
-
+    return 0;
 }
 //}---------------------------------------------------------------------------------------------------------------------------------
 

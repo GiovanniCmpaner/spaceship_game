@@ -16,7 +16,6 @@
 
 #include "game.h"
 #include "object.h"
-#include "json.h"
 #include "network.h"
 
 #include "input.h"
@@ -43,34 +42,9 @@
 static const char* tag = "game";
 static TaskHandle_t game_task_handle = NULL;
 
-static spaceship_control_t  spaceship_controls [2]  = {};
-static asteroid_control_t   asteroid_controls  [20] = {};
-static impact_control_t     impact_controls    [15] = {};
-static projectile_control_t projectile_controls[50] = {};
-static pickup_control_t     pickup_controls    [5] =  {};
-static meteor_control_t     meteor_controls    [5] =  {};
-
 static game_state_t game_state = {
     .current_player = 0,
-    .play_timer = 0,
-    
-    spaceship_controls, 
-    sizeof(spaceship_controls) / sizeof(*spaceship_controls),
-    
-    asteroid_controls,
-    sizeof(asteroid_controls)  / sizeof(*asteroid_controls),
-    
-    impact_controls,    
-    sizeof(impact_controls)    / sizeof(*impact_controls),
-    
-    projectile_controls,
-    sizeof(projectile_controls)/ sizeof(*projectile_controls),
-    
-    pickup_controls,    
-    sizeof(pickup_controls)    / sizeof(*pickup_controls),
-    
-    meteor_controls,
-    sizeof(meteor_controls)    / sizeof(*meteor_controls)
+    .play_timer = 0
 };
 
 static const uint8_t fps = 30;
@@ -82,7 +56,6 @@ static void game_process();
 void game_initialize(){
     ESP_LOGI(tag,"initialize");
     if( game_task_handle == NULL ){
-        network_initialize( NETWORK_SERVER, NETWORK_TCP );
         xTaskCreatePinnedToCore(game_process, "game_process", 4096, NULL, 5, &game_task_handle, 0);
     }
     vTaskResume( game_task_handle );
@@ -118,7 +91,7 @@ static void game_generate_projectile( projectile_type_t type ){
         spaceship_control->ammunitions[type]--;
     }
 
-    for(size_t n = game_state.spaceships_length; n < game_state.projectiles_length; n++){
+    for(size_t n = sizeof(game_state.spaceships)/sizeof(*game_state.spaceships); n < sizeof(game_state.projectiles)/sizeof(*game_state.projectiles); n++){
         projectile_control_t* projectile_control = &game_state.projectiles[n];
         
         if( projectile_control->active ){
@@ -229,7 +202,7 @@ static void game_input(){
 }
 //-----------------------------------------------------------------------------------------
 static void game_move_projectiles( uint32_t milliseconds ){
-    for(size_t n = 0; n < game_state.projectiles_length; n++){
+    for(size_t n = 0; n < sizeof(game_state.projectiles)/sizeof(*game_state.projectiles); n++){
         projectile_control_t* projectile_control = &game_state.projectiles[n];
         
         if( !projectile_control->active ){
@@ -287,7 +260,7 @@ static void game_move_projectiles( uint32_t milliseconds ){
 }
 //-----------------------------------------------------------------------------------------
 static void game_move_asteroids( uint32_t milliseconds ){
-    for(size_t n = 0; n < game_state.asteroids_length; n++){
+    for(size_t n = 0; n < sizeof(game_state.asteroids)/sizeof(*game_state.asteroids); n++){
         asteroid_control_t* asteroid_control = &game_state.asteroids[n];
         
         if( !asteroid_control->active ){
@@ -326,7 +299,7 @@ static void game_move_asteroids( uint32_t milliseconds ){
 }
 //-----------------------------------------------------------------------------------------
 static void game_move_pickups( uint32_t milliseconds ){
-    for(size_t n = 0; n < game_state.pickups_length; n++){
+    for(size_t n = 0; n < sizeof(game_state.pickups)/sizeof(*game_state.pickups); n++){
         pickup_control_t* pickup_control = &game_state.pickups[n];
         
         if( !pickup_control->active ){
@@ -353,7 +326,7 @@ static void game_move_pickups( uint32_t milliseconds ){
 }
 //-----------------------------------------------------------------------------------------
 static void game_move_spaceships( uint32_t milliseconds ){
-    for(size_t n = 0; n < game_state.spaceships_length; n++){
+    for(size_t n = 0; n < sizeof(game_state.spaceships)/sizeof(*game_state.spaceships); n++){
         spaceship_control_t* spaceship_control = &game_state.spaceships[n];
         
         if( !spaceship_control->active ){
@@ -433,7 +406,7 @@ static void game_move_spaceships( uint32_t milliseconds ){
 }
 //-----------------------------------------------------------------------------------------
 static void game_move_impacts( uint32_t milliseconds ){
-    for(size_t n = 0; n < game_state.impacts_length; n++){
+    for(size_t n = 0; n < sizeof(game_state.impacts)/sizeof(*game_state.impacts); n++){
         impact_control_t* impact_control = &game_state.impacts[n];
         
         if( !impact_control->active ){
@@ -461,7 +434,7 @@ static void game_move_impacts( uint32_t milliseconds ){
 }
 //-----------------------------------------------------------------------------------------
 static void game_move_meteors( uint32_t milliseconds ){
-    for(size_t n = 0; n < game_state.meteors_length; n++){
+    for(size_t n = 0; n < sizeof(game_state.meteors)/sizeof(*game_state.meteors); n++){
         meteor_control_t* meteor_control = &game_state.meteors[n];
         
         if( !meteor_control->active ){
@@ -577,7 +550,7 @@ static bool game_objects_collide( int16_t x0, int16_t y0, const image_t* image0,
 }
 //-----------------------------------------------------------------------------------------
 static void game_generate_impact( int16_t x, int16_t y, impact_type_t type, impact_size_t size ){
-    for(size_t n = 0; n < game_state.impacts_length; n++){
+    for(size_t n = 0; n < sizeof(game_state.impacts)/sizeof(*game_state.impacts); n++){
         impact_control_t* impact_control = &game_state.impacts[n];
         
         if( impact_control->active ){
@@ -598,14 +571,14 @@ static void game_generate_impact( int16_t x, int16_t y, impact_type_t type, impa
 }
 //-----------------------------------------------------------------------------------------
 static void game_collide_projectiles_asteroids(){
-    for(size_t n = 0; n < game_state.projectiles_length; n++){
+    for(size_t n = 0; n < sizeof(game_state.projectiles)/sizeof(*game_state.projectiles); n++){
         projectile_control_t* projectile_control = &game_state.projectiles[n];
         
         if( !projectile_control->active ){
             continue;
         }
         
-        for(size_t n = 0; n < game_state.asteroids_length; n++){
+        for(size_t n = 0; n < sizeof(game_state.asteroids)/sizeof(*game_state.asteroids); n++){
             asteroid_control_t* asteroid_control = &game_state.asteroids[n];
             
             if( ! asteroid_control->active ){
@@ -667,14 +640,14 @@ static void game_collide_projectiles_asteroids(){
 }
 //-----------------------------------------------------------------------------------------
 static void game_collide_spaceships_asteroids(){
-    for(size_t n = 0; n < game_state.spaceships_length; n++){
+    for(size_t n = 0; n < sizeof(game_state.spaceships)/sizeof(*game_state.spaceships); n++){
         spaceship_control_t* spaceship_control = &game_state.spaceships[n];
         
         if( !spaceship_control->active || spaceship_control->collision_countdown > 0 || spaceship_control->shield_active ){
             continue;
         }
         
-        for(size_t n = 0; n < game_state.asteroids_length; n++){
+        for(size_t n = 0; n < sizeof(game_state.asteroids)/sizeof(*game_state.asteroids); n++){
             asteroid_control_t* asteroid_control = &game_state.asteroids[n];
             
             if( !asteroid_control->active ){
@@ -696,7 +669,7 @@ static void game_collide_spaceships_asteroids(){
             }
 
             if(spaceship_control->life > 0){
-                spaceship_control->life--;
+                //spaceship_control->life--;
                 spaceship_control->collision_countdown = 3000;
                 spaceship_control->collision_active = true;
             }
@@ -713,7 +686,7 @@ static void game_collide_spaceships_asteroids(){
 }
 //-----------------------------------------------------------------------------------------
 static void game_collide_meteors_spaceships_asteroids(){
-    for(size_t n = 0; n < game_state.meteors_length; n++){
+    for(size_t n = 0; n < sizeof(game_state.meteors)/sizeof(*game_state.meteors); n++){
         meteor_control_t* meteor_control = &game_state.meteors[n];
         
         if( ! meteor_control->active || meteor_control->arrow_active){
@@ -735,7 +708,7 @@ static void game_collide_meteors_spaceships_asteroids(){
         }
         
        
-        for(size_t n = 0; n < game_state.asteroids_length; n++){
+        for(size_t n = 0; n < sizeof(game_state.asteroids)/sizeof(*game_state.asteroids); n++){
             asteroid_control_t* asteroid_control = &game_state.asteroids[n];
             
             if( !asteroid_control->active ){
@@ -761,7 +734,7 @@ static void game_collide_meteors_spaceships_asteroids(){
             asteroid_control->active = false;  
         }
 
-        for(size_t n = 0; n < game_state.spaceships_length; n++){
+        for(size_t n = 0; n < sizeof(game_state.spaceships)/sizeof(*game_state.spaceships); n++){
             spaceship_control_t* spaceship_control = &game_state.spaceships[n];
             
             if( !spaceship_control->active || spaceship_control->collision_countdown > 0 || spaceship_control->shield_active ){
@@ -782,7 +755,7 @@ static void game_collide_meteors_spaceships_asteroids(){
             }
 
             if(spaceship_control->life > 0){
-                spaceship_control->life--;
+                //spaceship_control->life--;
                 spaceship_control->collision_countdown = 3000;
                 spaceship_control->collision_active = true;
             }
@@ -795,14 +768,14 @@ static void game_collide_meteors_spaceships_asteroids(){
 }
 //-----------------------------------------------------------------------------------------
 static void game_collide_spaceships_pickups(){
-    for(size_t n = 0; n < game_state.spaceships_length; n++){
+    for(size_t n = 0; n < sizeof(game_state.spaceships)/sizeof(*game_state.spaceships); n++){
         spaceship_control_t* spaceship_control = &game_state.spaceships[n];
         
         if( !spaceship_control->active ){
             continue;
         }
         
-        for(size_t n = 0; n < game_state.pickups_length; n++){
+        for(size_t n = 0; n < sizeof(game_state.pickups)/sizeof(*game_state.pickups); n++){
             pickup_control_t* pickup_control = &game_state.pickups[n];
             
             if( ! pickup_control->active ){
@@ -853,7 +826,7 @@ static void game_collide(){
 }
 //-----------------------------------------------------------------------------------------
 static void game_draw_spaceships(){
-    for(size_t n = 0; n < game_state.spaceships_length; n++){
+    for(size_t n = 0; n < sizeof(game_state.spaceships)/sizeof(*game_state.spaceships); n++){
         const spaceship_control_t* spaceship_control = &game_state.spaceships[n];
         
         if( !spaceship_control->active || spaceship_control->collision_active ){
@@ -885,7 +858,7 @@ static void game_draw_background(){
 }
 //-----------------------------------------------------------------------------------------
 static void game_draw_projectiles(){
-    for(size_t n = 0; n < game_state.projectiles_length; n++){
+    for(size_t n = 0; n < sizeof(game_state.projectiles)/sizeof(*game_state.projectiles); n++){
         const projectile_control_t* projectile_control = &game_state.projectiles[n];
         
         if( !projectile_control->active ){
@@ -907,7 +880,7 @@ static void game_draw_projectiles(){
 }
 //-----------------------------------------------------------------------------------------
 static void game_draw_asteroids(){
-    for(size_t n = 0; n < game_state.asteroids_length; n++){
+    for(size_t n = 0; n < sizeof(game_state.asteroids)/sizeof(*game_state.asteroids); n++){
         const asteroid_control_t* asteroid_control = &game_state.asteroids[n];
         
         if( !asteroid_control->active ){
@@ -920,7 +893,7 @@ static void game_draw_asteroids(){
 }
 //-----------------------------------------------------------------------------------------
 static void game_draw_impacts(){
-    for(size_t n = 0; n < game_state.impacts_length; n++){
+    for(size_t n = 0; n < sizeof(game_state.impacts)/sizeof(*game_state.impacts); n++){
         const impact_control_t* impact_control = &game_state.impacts[n];
         
         if( !impact_control->active ){
@@ -933,7 +906,7 @@ static void game_draw_impacts(){
 }
 //-----------------------------------------------------------------------------------------
 static void game_draw_pickups(){
-    for(size_t n = 0; n < game_state.pickups_length; n++){
+    for(size_t n = 0; n < sizeof(game_state.pickups)/sizeof(*game_state.pickups); n++){
         const pickup_control_t* pickup_control = &game_state.pickups[n];
         
         if( !pickup_control->active ){
@@ -946,7 +919,7 @@ static void game_draw_pickups(){
 }
 //-----------------------------------------------------------------------------------------
 static void game_draw_meteors(){
-    for(size_t n = 0; n < game_state.meteors_length; n++){
+    for(size_t n = 0; n < sizeof(game_state.meteors)/sizeof(*game_state.meteors); n++){
         const meteor_control_t* meteor_control = &game_state.meteors[n];
         
         if( !meteor_control->active ){
@@ -1052,7 +1025,7 @@ static void game_generate_meteor( uint32_t milliseconds ){
     else {
         generator_countdown = 1000;
         
-        for(size_t n = 0; n < game_state.meteors_length; n++){
+        for(size_t n = 0; n < sizeof(game_state.meteors)/sizeof(*game_state.meteors); n++){
             meteor_control_t* meteor_control = &game_state.meteors[n];
         
             if( meteor_control->active ){
@@ -1109,7 +1082,7 @@ static void game_generate_pickup( uint32_t milliseconds ){
     else {
         generator_countdown = 10000;
         
-        for(size_t n = 0; n < game_state.pickups_length; n++){
+        for(size_t n = 0; n < sizeof(game_state.pickups)/sizeof(*game_state.pickups); n++){
             pickup_control_t* pickup_control = &game_state.pickups[n];
         
             if( pickup_control->active ){
@@ -1139,7 +1112,7 @@ static void game_generate_asteroid( uint32_t milliseconds ){
     else {
         generator_countdown = 1000;
         
-        for(size_t n = 0; n < game_state.asteroids_length; n++){
+        for(size_t n = 0; n < sizeof(game_state.asteroids)/sizeof(*game_state.asteroids); n++){
             asteroid_control_t* asteroid_control = &game_state.asteroids[n];
         
             if( asteroid_control->active ){

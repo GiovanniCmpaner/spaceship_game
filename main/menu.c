@@ -185,10 +185,6 @@ static void menu_process(){
                             redraw = true;
                         }
                     }
-                    else {
-                        game_initialize();
-                        menu_terminate();
-                    }
                 }
                 else if( n == ACTION_RIGHT ){
                     if( actual_menu == 3 ){
@@ -201,8 +197,19 @@ static void menu_process(){
                             redraw = true;
                         }
                     }
-                    else {
+                    else if( actual_menu == 2 ){
                         network_initialize( NETWORK_CLIENT, NETWORK_TCP );
+                        game_initialize();
+                        menu_terminate();
+                    }
+                    else if( actual_menu == 1 ){
+                        network_initialize( NETWORK_SERVER, NETWORK_TCP );
+                        game_initialize();
+                        menu_terminate();
+                    }
+                    else if( actual_menu == 0 ){
+                        game_initialize();
+                        menu_terminate();
                     }
                 }
                 else if( n == ACTION_DOWN ){
