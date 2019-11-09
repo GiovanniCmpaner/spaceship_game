@@ -200,7 +200,7 @@ static int network_receive_packet( const int* sock )
             state = RECEIVING_START;
         }
     }
-    if( timeout_timer != 0 && esp_timer_get_time() - timeout_timer > 30000 )
+    if( timeout_timer != 0 && esp_timer_get_time() - timeout_timer > 2500 )
     {
         ESP_LOGI(TAG,"timeout");
         timeout_timer = 0;
