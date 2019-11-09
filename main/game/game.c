@@ -39,7 +39,7 @@
 #define min(a,b) ((a)<(b)?(a):(b))
 #endif
 
-static const char* tag = "game";
+static const char* TAG = "game";
 static TaskHandle_t game_task_handle = NULL;
 
 static game_state_t game_state = {
@@ -51,20 +51,27 @@ static const uint8_t fps = 30;
 
 void game_initialize();
 void game_terminate();
-static void game_process();
+static void game_process( void *pvParameters );
 //-----------------------------------------------------------------------------------------
-void game_initialize(){
-    ESP_LOGI(tag,"initialize");
+void game_initialize( game_mode_t mode ){
+    ESP_LOGI(TAG,"initialize");
     if( game_task_handle == NULL ){
-        xTaskCreatePinnedToCore(game_process, "game_process", 4096, NULL, 5, &game_task_handle, 0);
+        if( mode == GAME_SERVER ){
+            network_initialize( NETWORK_SERVER, NETWORK_TCP, &game_state );
+        }
+        else if( mode == GAME_CLIENT ){
+            network_initialize( NETWORK_CLIENT, NETWORK_TCP, &game_state );
+        }
+        xTaskCreatePinnedToCore( game_process, "game_process", 4096, (void*)mode, 5, &game_task_handle, 0 );
     }
-    vTaskResume( game_task_handle );
 }
 //-----------------------------------------------------------------------------------------
 void game_terminate(){
-    ESP_LOGI(tag,"terminate");
+    ESP_LOGI(TAG,"terminate");
     if( game_task_handle != NULL ){
-        vTaskSuspend( game_task_handle );
+        network_terminate();
+        vTaskDelete( game_task_handle );
+        game_task_handle = NULL;
     }
 }
 //-----------------------------------------------------------------------------------------
@@ -1163,11 +1170,16 @@ static void game_generate( uint32_t milliseconds ){
     game_generate_meteor( milliseconds );
 }
 //-----------------------------------------------------------------------------------------
-static void game_sync(){
-    network_sync( &game_state );
+static void game_receive(){
+    network_receive();
 }
 //-----------------------------------------------------------------------------------------
-static void game_process(){
+static void game_send(){
+    network_send();
+}
+//-----------------------------------------------------------------------------------------
+static void game_process( void *pvParameters ){
+    game_mode_t mode = (game_mode_t)pvParameters;
     
     const spaceship_control_t spaceship_control = {
         .active = true,
@@ -1179,6 +1191,13 @@ static void game_process(){
         .life = 3,
         .ammunitions = { 0, 20, 10, 30 },
     };
+    if( mode != GAME_CLIENT )
+    {
+        game_state.current_player = 0;
+    }
+    else {
+        game_state.current_player = 1;
+    }
     game_state.spaceships[ game_state.current_player ] = spaceship_control;
         
     const TickType_t interval = pdMS_TO_TICKS( 30 );
@@ -1187,15 +1206,31 @@ static void game_process(){
     while(1){
         const uint32_t milliseconds = ( ( current_wake_time - last_wake_time ) * 1000 ) / configTICK_RATE_HZ;
         last_wake_time = current_wake_time;
+        game_state.play_timer += milliseconds;
         
-        game_sync();
+        if( mode != GAME_CLIENT )
+        {
+            game_receive();
+        }
+        else {
+            game_send();
+        }
         game_input(); // task -> wait( BIT_REFRESH )
         game_move( milliseconds ); // task -> wait( BIT_REFRESH | BIT_INPUT )
-        game_generate( milliseconds ); // task -> wait( BIT_REFRESH )
+        if( mode != GAME_CLIENT )
+        {
+            game_generate( milliseconds ); // task -> wait( BIT_REFRESH )
+        }
         game_collide(); // task -> wait( BIT_REFRESH | BIT_MOVE )
         game_draw(); // task -> wait( BIT_REFRESH | BIT_INPUT | BIT_MOVE | BIT_GENERATE )
-        
-        game_state.play_timer += milliseconds;
+        game_send();
+        if( mode != GAME_CLIENT )
+        {
+            game_send();
+        }
+        else {
+            game_receive();
+        }
         vTaskDelayUntil( &current_wake_time, interval );
     }
 }

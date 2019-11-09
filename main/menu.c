@@ -198,18 +198,19 @@ static void menu_process(){
                         }
                     }
                     else if( actual_menu == 2 ){
-                        network_initialize( NETWORK_CLIENT, NETWORK_TCP );
-                        game_initialize();
+                        game_initialize( GAME_CLIENT );
                         menu_terminate();
+                        break;
                     }
                     else if( actual_menu == 1 ){
-                        network_initialize( NETWORK_SERVER, NETWORK_TCP );
-                        game_initialize();
+                        game_initialize( GAME_SERVER );
                         menu_terminate();
+                        break;
                     }
                     else if( actual_menu == 0 ){
-                        game_initialize();
+                        game_initialize( GAME_OFFLINE );
                         menu_terminate();
+                        break;
                     }
                 }
                 else if( n == ACTION_DOWN ){

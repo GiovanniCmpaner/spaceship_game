@@ -38,7 +38,16 @@ static const char* TAG = "network";
 const int IPV4_GOTIP_BIT = BIT0;
 const int IPV6_GOTIP_BIT = BIT1;
 
+typedef enum {
+    NETWORK_RECEIVE  = BIT(0),
+    NETWORK_RECEIVED = BIT(1),
+    NETWORK_SEND     = BIT(2),
+    NETWORK_SENT     = BIT(3)
+} network_event_t;
+
 static TaskHandle_t network_task_handle;
+static EventGroupHandle_t network_event_group;
+
 static EventGroupHandle_t wifi_event_group;
 //-----------------------------------------------------------------------------------------
 static esp_err_t event_handler(void *ctx, system_event_t *event)
@@ -84,8 +93,8 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
     return ESP_OK;
 }
 //-----------------------------------------------------------------------------------------
-static char buffer[15000];
-static uint16_t position = 0;
+static char buffer[20000];
+static uint16_t buffer_position = 0;
 static bool valid = false;
 
 typedef enum {
@@ -95,15 +104,15 @@ typedef enum {
     RECEIVING_DATA,
     RECEIVING_END
 } state_t;
+
+static state_t  receiving_state = RECEIVING_START;
+static uint16_t length = 0;
+static uint32_t crc = 0;
+static int64_t  timeout_timer = 0;
 //-----------------------------------------------------------------------------------------
 static int network_receive_packet( const int* sock )
 {
-    static state_t  state = RECEIVING_START;
-    static uint16_t length;
-    static uint32_t crc;
-    static int64_t timeout_timer = 0;
-
-    if( state == RECEIVING_START )
+    if( receiving_state == RECEIVING_START )
     {
         uint8_t start;
         
@@ -116,66 +125,69 @@ static int network_receive_packet( const int* sock )
         {
             if( start == '\x02' ){
                 valid = false;
-                position = 0;
-                state = RECEIVING_LENGTH;
+                buffer_position = 0;
+                //ESP_LOGI(TAG, "RECEIVING_LENGTH");
+                receiving_state = RECEIVING_LENGTH;
                 timeout_timer = esp_timer_get_time();
             }
         }
     }
-    else if( state == RECEIVING_LENGTH )
+    else if( receiving_state == RECEIVING_LENGTH )
     {
-        const int err = lwip_recv( *sock, (uint8_t*)&length + position, sizeof( uint16_t ) - position, MSG_DONTWAIT );
+        const int err = lwip_recv( *sock, (uint8_t*)&length + buffer_position, sizeof( uint16_t ) - buffer_position, MSG_DONTWAIT );
         if( err < 0 && errno != EAGAIN )
         {
             return err;
         }
         else if( err > 0 )
         {
-            position += err;
-            if( position >= sizeof( uint16_t ) )
+            buffer_position += err;
+            if( buffer_position >= sizeof( uint16_t ) )
             {
-                position = 0;
-                state = RECEIVING_CRC;
+                buffer_position = 0;
+                //ESP_LOGI(TAG, "RECEIVING_CRC");
+                receiving_state = RECEIVING_CRC;
             }
             timeout_timer = esp_timer_get_time();
         }
     }
-    else if( state == RECEIVING_CRC )
+    else if( receiving_state == RECEIVING_CRC )
     {
-        const int err = lwip_recv( *sock, (uint8_t*)&crc + position, sizeof( uint32_t ) - position, MSG_DONTWAIT );
+        const int err = lwip_recv( *sock, (uint8_t*)&crc + buffer_position, sizeof( uint32_t ) - buffer_position, MSG_DONTWAIT );
         if( err < 0 && errno != EAGAIN )
         {
             return err;
         }
         else if( err > 0 )
         {
-            position += err;
-            if( position >= sizeof( uint32_t ) )
+            buffer_position += err;
+            if( buffer_position >= sizeof( uint32_t ) )
             {
-                position = 0;
-                state = RECEIVING_DATA;
+                buffer_position = 0;
+                //ESP_LOGI(TAG, "RECEIVING_DATA");
+                receiving_state = RECEIVING_DATA;
             }
             timeout_timer = esp_timer_get_time();
         }
     }
-    else if( state == RECEIVING_DATA )
+    else if( receiving_state == RECEIVING_DATA )
     {
-        const int err = lwip_recv( *sock, (uint8_t*)buffer + position, length - position, MSG_DONTWAIT );
+        const int err = lwip_recv( *sock, (uint8_t*)buffer + buffer_position, length - buffer_position, MSG_DONTWAIT );
         if( err < 0 && errno != EAGAIN )
         {
             return err;
         }
         else if( err > 0 )
         {
-            position += err;
-            if( position >= length ){
-                position = 0;
-                state = RECEIVING_END;
+            buffer_position += err;
+            if( buffer_position >= length ){
+                //ESP_LOGI(TAG, "RECEIVING_END");
+                receiving_state = RECEIVING_END;
             }
             timeout_timer = esp_timer_get_time();
         }
     }
-    else if( state == RECEIVING_END )
+    else if( receiving_state == RECEIVING_END )
     {
         uint8_t end;
         
@@ -186,34 +198,42 @@ static int network_receive_packet( const int* sock )
         }
         else if( err > 0 )
         {
+            ESP_LOGE( TAG, "end = %02X", end );
             if( end == '\x03' )
             {
                 const uint32_t crc_calculated = crc32_be( 0, (const uint8_t*)buffer, length );
                 if( crc == crc_calculated )
                 {
-                    position = length;
                     valid = true;
                     ESP_LOGE( TAG, "valid" );
                 }
+                else {
+                    //ESP_LOGI( TAG, "crc = %08X / calculated = %08X", crc, crc_calculated );
+                }
             }
             timeout_timer = 0;
-            state = RECEIVING_START;
+            //ESP_LOGI(TAG, "RECEIVING_START");
+            receiving_state = RECEIVING_START;
         }
     }
+    
     if( timeout_timer != 0 && esp_timer_get_time() - timeout_timer > 2500 )
     {
-        ESP_LOGI(TAG,"timeout");
+        //ESP_LOGI(TAG,"timeout");
         timeout_timer = 0;
-        position = 0;
+        buffer_position = 0;
         valid = false;
-        state = RECEIVING_START;
+        //ESP_LOGI(TAG, "RECEIVING_START");
+        receiving_state = RECEIVING_START;
     }
     return 0;
 }
 //-----------------------------------------------------------------------------------------
 static int network_send_packet( const int* sock )
 {
-    const uint32_t crc = crc32_be( 0, (const uint8_t*)buffer, position );
+    //ESP_LOGI( TAG, "network_send_packet %u", buffer_position );
+    
+    const uint32_t crc = crc32_be( 0, (const uint8_t*)buffer, buffer_position );
     {
         const int err = lwip_send( *sock, (const uint8_t*)"\x02", sizeof(uint8_t), MSG_MORE );
         if ( err < 0 )
@@ -222,7 +242,7 @@ static int network_send_packet( const int* sock )
         }
     }
     {
-        const int err = lwip_send( *sock, (const uint8_t*)&position, sizeof(uint16_t), MSG_MORE );
+        const int err = lwip_send( *sock, (const uint8_t*)&buffer_position, sizeof(uint16_t), MSG_MORE );
         if ( err < 0 )
         {
             return err;
@@ -236,7 +256,7 @@ static int network_send_packet( const int* sock )
         }
     }
     {
-        const int err = lwip_send( *sock, (const uint8_t*)buffer, position, MSG_MORE );
+        const int err = lwip_send( *sock, (const uint8_t*)buffer, buffer_position, MSG_MORE );
         if ( err < 0 )
         {
             return err;
@@ -256,13 +276,15 @@ static void wait_for_ip()
 {
     uint32_t bits = IPV4_GOTIP_BIT;// | IPV6_GOTIP_BIT ;
 
-    ESP_LOGI(TAG, "Waiting for AP connection...");
+    //ESP_LOGI(TAG, "Waiting for AP connection...");
     xEventGroupWaitBits(wifi_event_group, bits, false, true, portMAX_DELAY);
-    ESP_LOGI(TAG, "Connected to AP");
+    //ESP_LOGI(TAG, "Connected to AP");
 }
 //-----------------------------------------------------------------------------------------
 static void network_process_tcp_client(void *pvParameters)
 {
+    game_state_t* game_state = pvParameters;
+    
     const struct sockaddr_in destAddr = {
         .sin_addr.s_addr = inet_addr(HOST_IP_ADDR),
         .sin_family = AF_INET,
@@ -296,28 +318,36 @@ static void network_process_tcp_client(void *pvParameters)
                         break;
                     }
                 }
-                game_state_t* game_state;
-                if( xTaskNotifyWait( 0, ULONG_MAX, (uint32_t*)&game_state, 0 ) )
-                { 
+                if( xEventGroupWaitBits( network_event_group, NETWORK_RECEIVE, pdTRUE, pdTRUE, 0 ) )
+                {
+                    //ESP_LOGI( TAG, "RECEIVE" );
                     if( valid ){
-                        protocol_game_from_server( game_state, buffer, position );
+                        protocol_game_from_server( game_state, buffer, buffer_position );
                          // Checa as regras -> munições / movimento
-                        position = 0;
+                        buffer_position = 0;
                         valid = false;
                     }
-                    //position = protocol_game_to_server( game_state, buffer, sizeof( buffer ) );
-                    //{
-                    //    const int err = network_send_packet( &client_sock );
-                    //    if ( err < 0 ) {
-                    //        ESP_LOGE( TAG, "Error occured during sending: %s", lwip_strerr( errno ) );
-                    //        break;
-                    //    }
-                    //}
+                    xEventGroupSetBits( network_event_group, NETWORK_RECEIVED );
+                }
+                if( receiving_state == RECEIVING_START ){
+                    if( xEventGroupWaitBits( network_event_group, NETWORK_SEND, pdTRUE, pdTRUE, 0 ) )
+                    {
+                        ////ESP_LOGI( TAG, "SEND" );
+                        //buffer_position = protocol_game_to_server( game_state, buffer, sizeof( buffer ) );
+                        //{
+                        //    const int err = network_send_packet( &client_sock );
+                        //    if ( err < 0 ) {
+                        //        ESP_LOGE( TAG, "Error occured during sending: %s", lwip_strerr( errno ) );
+                        //        break;
+                        //    }
+                        //}
+                        xEventGroupSetBits( network_event_group, NETWORK_SENT );
+                    }
                 }
             }
         }
         if (client_sock != -1) {
-        //    lwip_shutdown(client_sock, 0);
+            lwip_shutdown(client_sock, 0);
             lwip_close( client_sock );
         }
     }
@@ -326,6 +356,8 @@ static void network_process_tcp_client(void *pvParameters)
 //-----------------------------------------------------------------------------------------
 static void network_process_tcp_server(void *pvParameters)
 {
+    game_state_t* game_state = pvParameters;
+    
     const struct sockaddr_in destAddr = {
         .sin_addr.s_addr = htonl(INADDR_ANY),
         .sin_family = AF_INET,
@@ -353,7 +385,7 @@ static void network_process_tcp_server(void *pvParameters)
             ESP_LOGE( TAG, "Error occured during listen: %s", lwip_strerr( errno ) );
             return;
         }
-        ESP_LOGI( TAG, "Socket listening" );
+        //ESP_LOGI( TAG, "Socket listening" );
     }
     while(1){
 
@@ -374,22 +406,30 @@ static void network_process_tcp_server(void *pvParameters)
                     break;
                 }
             }
-            game_state_t* game_state;
-            if( xTaskNotifyWait( 0, ULONG_MAX, (uint32_t*)&game_state, 0 ) )
-            { 
+            if( xEventGroupWaitBits( network_event_group, NETWORK_RECEIVE, pdTRUE, pdTRUE, 0 ) )
+            {
+                //ESP_LOGI( TAG, "RECEIVE" );
                 if( valid ){
-                    protocol_game_from_client( game_state, buffer, position ); 
+                    protocol_game_from_client( game_state, buffer, buffer_position ); 
                     // Checa as regras -> munições / movimento
-                    position = 0;
+                    buffer_position = 0;
                     valid = false;
                 }
-                position = protocol_game_to_client( game_state, buffer, sizeof( buffer ) );
+                xEventGroupSetBits( network_event_group, NETWORK_RECEIVED );
+            }
+            if( receiving_state == RECEIVING_START ){
+                if( xEventGroupWaitBits( network_event_group, NETWORK_SEND, pdTRUE, pdTRUE, 0 ) )
                 {
-                    const int err = network_send_packet( &client_sock );
-                    if ( err < 0 ) {
-                        ESP_LOGE( TAG, "Error occured during sending: %s", lwip_strerr( errno ) );
-                        break;
+                    //ESP_LOGI( TAG, "SEND" );
+                    buffer_position = protocol_game_to_client( game_state, buffer, sizeof( buffer ) );
+                    {
+                        const int err = network_send_packet( &client_sock );
+                        if ( err < 0 ) {
+                            ESP_LOGE( TAG, "Error occured during sending: %s", lwip_strerr( errno ) );
+                            break;
+                        }
                     }
+                    xEventGroupSetBits( network_event_group, NETWORK_SENT );
                 }
             }
         }
@@ -478,10 +518,10 @@ static void network_process_tcp_server(void *pvParameters)
         //        
         //        const int64_t start = esp_timer_get_time();
         //        len = protocol_game_to_client( &str, game_state );
-        //        //ESP_LOGI(TAG,"len = %zu",len);
+        //        ////ESP_LOGI(TAG,"len = %zu",len);
         //        //puts(str);
         //        const int64_t end = esp_timer_get_time();
-        //        ESP_LOGI(TAG,"t = %lld",end-start);
+        //        //ESP_LOGI(TAG,"t = %lld",end-start);
         //    }
         //}
     }
@@ -510,7 +550,7 @@ static void network_initialize_common()
     ESP_ERROR_CHECK( esp_wifi_set_storage(WIFI_STORAGE_RAM) );
 }
 //-----------------------------------------------------------------------------------------
-static void network_initialize_client( network_type_t type )
+static void network_initialize_client( network_type_t type, game_state_t* game_state )
 {
     wifi_config_t wifi_config = {
         .sta = {
@@ -518,7 +558,7 @@ static void network_initialize_client( network_type_t type )
             .password = EXAMPLE_WIFI_PASS,
         },
     };
-    ESP_LOGI(TAG, "Setting WiFi configuration SSID for STA %s...", wifi_config.sta.ssid);
+    //ESP_LOGI(TAG, "Setting WiFi configuration SSID for STA %s...", wifi_config.sta.ssid);
     ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_STA) );
     ESP_ERROR_CHECK( esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config) );
     ESP_ERROR_CHECK( esp_wifi_start() );
@@ -526,15 +566,15 @@ static void network_initialize_client( network_type_t type )
     wait_for_ip();
     if( type == NETWORK_TCP )
     {
-        xTaskCreatePinnedToCore( network_process_tcp_client, "network_process_tcp_client", 4096, NULL, 5, &network_task_handle, 0 );
+        xTaskCreatePinnedToCore( network_process_tcp_client, "network_process_tcp_client", 4096, game_state, 5, &network_task_handle, 1 );
     }
     else if( type == NETWORK_UDP )
     {
-        //xTaskCreatePinnedToCore( network_process_udp_client, "network_process_udp_client", 4096, NULL, 5, &network_task_handle, 0 );
+        //xTaskCreatePinnedToCore( network_process_udp_client, "network_process_udp_client", 4096, NULL, 5, &network_task_handle, 1 );
     }
 }
 //-----------------------------------------------------------------------------------------
-static void network_initialize_server( network_type_t type )
+static void network_initialize_server( network_type_t type, game_state_t* game_state )
 {
     wifi_config_t wifi_config = {
         .ap = {
@@ -549,10 +589,10 @@ static void network_initialize_server( network_type_t type )
     ESP_ERROR_CHECK( esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config) );
     ESP_ERROR_CHECK( esp_wifi_start() );
     
-    ESP_LOGI(TAG, "wifi_init_softap finished.SSID:%s password:%s", EXAMPLE_WIFI_SSID, EXAMPLE_WIFI_PASS);
+    //ESP_LOGI(TAG, "wifi_init_softap finished.SSID:%s password:%s", EXAMPLE_WIFI_SSID, EXAMPLE_WIFI_PASS);
     if( type == NETWORK_TCP )
     {
-        xTaskCreatePinnedToCore( network_process_tcp_server, "network_process_tcp_server", 4096, NULL, 5, &network_task_handle, 0 );
+        xTaskCreatePinnedToCore( network_process_tcp_server, "network_process_tcp_server", 4096, game_state, 5, &network_task_handle, 1 );
     }
     else if( type == NETWORK_UDP )
     {
@@ -560,28 +600,68 @@ static void network_initialize_server( network_type_t type )
     }
 }
 //-----------------------------------------------------------------------------------------
-void network_initialize( network_mode_t mode, network_type_t type )
+void network_initialize( network_mode_t mode, network_type_t type, game_state_t* game_state )
 {
-    network_initialize_common();
+    //ESP_LOGI(TAG,"initialize");
     
-    if( mode == NETWORK_CLIENT ){ 
-        network_initialize_client( type );
-    }
-    else if( mode == NETWORK_SERVER ){
-        network_initialize_server( type );
+    //ESP_LOGI(TAG,"flags = %08X | %08X | %08X | %08X",NETWORK_RECEIVE,NETWORK_RECEIVED,NETWORK_SEND,NETWORK_SENT);
+    
+    if( network_task_handle == NULL )
+    {
+        network_event_group = xEventGroupCreate();
+        
+        network_initialize_common();
+        
+        if( mode == NETWORK_CLIENT ){ 
+            network_initialize_client( type, game_state );
+        }
+        else if( mode == NETWORK_SERVER ){
+            network_initialize_server( type, game_state );
+        }
     }
 }
 //-----------------------------------------------------------------------------------------
 void network_terminate()
 {
-    
+    //ESP_LOGI(TAG,"terminate");
+    if( network_task_handle != NULL )
+    {
+        vTaskDelete( network_task_handle );
+        network_task_handle = NULL;
+    }
 }
 //-----------------------------------------------------------------------------------------
 void network_sync( game_state_t* game_state )
 {
+    
+}
+//-----------------------------------------------------------------------------------------
+void network_send()
+{
     if( network_task_handle != NULL )
     {
-        xTaskNotify( network_task_handle, (uint32_t)game_state, eSetValueWithOverwrite );
+        if( ( xEventGroupGetBits( network_event_group ) & NETWORK_SEND ) == 0 ){
+            xEventGroupSetBits( network_event_group, NETWORK_SEND );
+            xEventGroupWaitBits( network_event_group, NETWORK_SENT, pdTRUE, pdTRUE, portMAX_DELAY );
+        }
+        else {
+            ESP_LOGE(TAG,"already SEND");
+        }
+    }
+}
+//-----------------------------------------------------------------------------------------
+void network_receive()
+{
+    if( network_task_handle != NULL )
+    {   
+        if( ( xEventGroupGetBits( network_event_group ) & NETWORK_RECEIVE ) == 0 ){
+            xEventGroupSetBits( network_event_group, NETWORK_RECEIVE );
+            xEventGroupWaitBits( network_event_group, NETWORK_RECEIVED, pdTRUE, pdTRUE, portMAX_DELAY );
+            
+        }
+        else {
+            ESP_LOGE(TAG,"already RECEIVE");
+        }
     }
 }
 //-----------------------------------------------------------------------------------------
