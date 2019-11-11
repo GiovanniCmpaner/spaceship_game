@@ -369,6 +369,7 @@ static void protocol_spaceships_from_client( ArduinoJson::JsonDocument& game_jso
         return;
     }
     
+    auto spaceship_n_json = spaceships_json[ 0 ];
     
     game_state->spaceships[ client_player ].active = spaceship_n_json[ "active" ];
     if( game_state->spaceships[ client_player ].active )
@@ -389,7 +390,7 @@ static void protocol_spaceships_from_client( ArduinoJson::JsonDocument& game_jso
 }
 //}---------------------------------------------------------------------------------------------------------------------------------
 //{---------------------------------------------------------------------------------------------------------------------------------
-static ArduinoJson::StaticJsonDocument<30000> game_json{ };
+static ArduinoJson::StaticJsonDocument<20000> game_json{ };
 
 void protocol_game_from_server( game_state_t* game_state, const char* buffer, size_t length )
 {

@@ -1223,7 +1223,6 @@ static void game_process( void *pvParameters ){
         }
         game_collide(); // task -> wait( BIT_REFRESH | BIT_MOVE )
         game_draw(); // task -> wait( BIT_REFRESH | BIT_INPUT | BIT_MOVE | BIT_GENERATE )
-        game_send();
         if( mode != GAME_CLIENT )
         {
             game_send();

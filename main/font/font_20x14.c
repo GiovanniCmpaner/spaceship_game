@@ -2657,7 +2657,7 @@ const font_t font20x14 = {
         &character107,
         &character108,
         &character109,
-        &character114,
+        &character110,
         &character111,
         &character112,
         &character113,

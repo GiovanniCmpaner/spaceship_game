@@ -17,6 +17,7 @@
 #include "lwip/err.h"
 #include "lwip/sockets.h"
 #include "lwip/sys.h"
+#include "lwip/api.h"
 #include <lwip/netdb.h>
 
 #include "esp_timer.h"
@@ -24,31 +25,22 @@
 #include "esp_log.h"
 
 #include "network.h"
-#include "protocol.h"
+#include "network_tcp.h"
 
 //-----------------------------------------------------------------------------------------
 #define EXAMPLE_WIFI_SSID "WORKGROUP2"
 #define EXAMPLE_WIFI_PASS "49WNN7F3CD@22"
 #define EXAMPLE_MAX_STA_CONN 2
-#define HOST_IP_ADDR "192.168.4.1" //"fe80::1400:4639:cc8d:3033" //"fe80::a650:46ff:feeb:efe8" 
-#define PORT 5000
 //-----------------------------------------------------------------------------------------
 static const char* TAG = "network";
 
+static EventGroupHandle_t wifi_event_group = NULL;
+
+void (*func_send)() = NULL;
+void (*func_receive)() = NULL;
+
 const int IPV4_GOTIP_BIT = BIT0;
 const int IPV6_GOTIP_BIT = BIT1;
-
-typedef enum {
-    NETWORK_RECEIVE  = BIT(0),
-    NETWORK_RECEIVED = BIT(1),
-    NETWORK_SEND     = BIT(2),
-    NETWORK_SENT     = BIT(3)
-} network_event_t;
-
-static TaskHandle_t network_task_handle;
-static EventGroupHandle_t network_event_group;
-
-static EventGroupHandle_t wifi_event_group;
 //-----------------------------------------------------------------------------------------
 static esp_err_t event_handler(void *ctx, system_event_t *event)
 {
@@ -93,185 +85,6 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
     return ESP_OK;
 }
 //-----------------------------------------------------------------------------------------
-static char buffer[20000];
-static uint16_t buffer_position = 0;
-static bool valid = false;
-
-typedef enum {
-    RECEIVING_START,
-    RECEIVING_LENGTH,
-    RECEIVING_CRC,
-    RECEIVING_DATA,
-    RECEIVING_END
-} state_t;
-
-static state_t  receiving_state = RECEIVING_START;
-static uint16_t length = 0;
-static uint32_t crc = 0;
-static int64_t  timeout_timer = 0;
-//-----------------------------------------------------------------------------------------
-static int network_receive_packet( const int* sock )
-{
-    if( receiving_state == RECEIVING_START )
-    {
-        uint8_t start;
-        
-        const int err = lwip_recv( *sock, (uint8_t*)&start, sizeof( uint8_t ), MSG_DONTWAIT );
-        if( err < 0 && errno != EAGAIN )
-        {
-            return err;
-        } 
-        else if( err > 0 )
-        {
-            if( start == '\x02' ){
-                valid = false;
-                buffer_position = 0;
-                //ESP_LOGI(TAG, "RECEIVING_LENGTH");
-                receiving_state = RECEIVING_LENGTH;
-                timeout_timer = esp_timer_get_time();
-            }
-        }
-    }
-    else if( receiving_state == RECEIVING_LENGTH )
-    {
-        const int err = lwip_recv( *sock, (uint8_t*)&length + buffer_position, sizeof( uint16_t ) - buffer_position, MSG_DONTWAIT );
-        if( err < 0 && errno != EAGAIN )
-        {
-            return err;
-        }
-        else if( err > 0 )
-        {
-            buffer_position += err;
-            if( buffer_position >= sizeof( uint16_t ) )
-            {
-                buffer_position = 0;
-                //ESP_LOGI(TAG, "RECEIVING_CRC");
-                receiving_state = RECEIVING_CRC;
-            }
-            timeout_timer = esp_timer_get_time();
-        }
-    }
-    else if( receiving_state == RECEIVING_CRC )
-    {
-        const int err = lwip_recv( *sock, (uint8_t*)&crc + buffer_position, sizeof( uint32_t ) - buffer_position, MSG_DONTWAIT );
-        if( err < 0 && errno != EAGAIN )
-        {
-            return err;
-        }
-        else if( err > 0 )
-        {
-            buffer_position += err;
-            if( buffer_position >= sizeof( uint32_t ) )
-            {
-                buffer_position = 0;
-                //ESP_LOGI(TAG, "RECEIVING_DATA");
-                receiving_state = RECEIVING_DATA;
-            }
-            timeout_timer = esp_timer_get_time();
-        }
-    }
-    else if( receiving_state == RECEIVING_DATA )
-    {
-        const int err = lwip_recv( *sock, (uint8_t*)buffer + buffer_position, length - buffer_position, MSG_DONTWAIT );
-        if( err < 0 && errno != EAGAIN )
-        {
-            return err;
-        }
-        else if( err > 0 )
-        {
-            buffer_position += err;
-            if( buffer_position >= length ){
-                //ESP_LOGI(TAG, "RECEIVING_END");
-                receiving_state = RECEIVING_END;
-            }
-            timeout_timer = esp_timer_get_time();
-        }
-    }
-    else if( receiving_state == RECEIVING_END )
-    {
-        uint8_t end;
-        
-        const int err = lwip_recv( *sock, (uint8_t*)&end, sizeof( uint8_t ), MSG_DONTWAIT );
-        if( err < 0 && errno != EAGAIN )
-        {
-            return err;
-        }
-        else if( err > 0 )
-        {
-            ESP_LOGE( TAG, "end = %02X", end );
-            if( end == '\x03' )
-            {
-                const uint32_t crc_calculated = crc32_be( 0, (const uint8_t*)buffer, length );
-                if( crc == crc_calculated )
-                {
-                    valid = true;
-                    ESP_LOGE( TAG, "valid" );
-                }
-                else {
-                    //ESP_LOGI( TAG, "crc = %08X / calculated = %08X", crc, crc_calculated );
-                }
-            }
-            timeout_timer = 0;
-            //ESP_LOGI(TAG, "RECEIVING_START");
-            receiving_state = RECEIVING_START;
-        }
-    }
-    
-    if( timeout_timer != 0 && esp_timer_get_time() - timeout_timer > 2500 )
-    {
-        //ESP_LOGI(TAG,"timeout");
-        timeout_timer = 0;
-        buffer_position = 0;
-        valid = false;
-        //ESP_LOGI(TAG, "RECEIVING_START");
-        receiving_state = RECEIVING_START;
-    }
-    return 0;
-}
-//-----------------------------------------------------------------------------------------
-static int network_send_packet( const int* sock )
-{
-    //ESP_LOGI( TAG, "network_send_packet %u", buffer_position );
-    
-    const uint32_t crc = crc32_be( 0, (const uint8_t*)buffer, buffer_position );
-    {
-        const int err = lwip_send( *sock, (const uint8_t*)"\x02", sizeof(uint8_t), MSG_MORE );
-        if ( err < 0 )
-        {
-            return err;
-        }
-    }
-    {
-        const int err = lwip_send( *sock, (const uint8_t*)&buffer_position, sizeof(uint16_t), MSG_MORE );
-        if ( err < 0 )
-        {
-            return err;
-        }
-    }
-    {
-        const int err = lwip_send( *sock, (const uint8_t*)&crc, sizeof(uint32_t), MSG_MORE );
-        if ( err < 0 )
-        {
-            return err;
-        }
-    }
-    {
-        const int err = lwip_send( *sock, (const uint8_t*)buffer, buffer_position, MSG_MORE );
-        if ( err < 0 )
-        {
-            return err;
-        }
-    }
-    {
-        const int err = lwip_send( *sock, (const uint8_t*)"\x03", sizeof(uint8_t), 0 );
-        if ( err < 0 )
-        {
-            return err;
-        }
-    }
-    return 0;
-}
-//-----------------------------------------------------------------------------------------
 static void wait_for_ip()
 {
     uint32_t bits = IPV4_GOTIP_BIT;// | IPV6_GOTIP_BIT ;
@@ -279,253 +92,6 @@ static void wait_for_ip()
     //ESP_LOGI(TAG, "Waiting for AP connection...");
     xEventGroupWaitBits(wifi_event_group, bits, false, true, portMAX_DELAY);
     //ESP_LOGI(TAG, "Connected to AP");
-}
-//-----------------------------------------------------------------------------------------
-static void network_process_tcp_client(void *pvParameters)
-{
-    game_state_t* game_state = pvParameters;
-    
-    const struct sockaddr_in destAddr = {
-        .sin_addr.s_addr = inet_addr(HOST_IP_ADDR),
-        .sin_family = AF_INET,
-        .sin_port = htons(PORT)
-    };
-    
-    //char addr_str[128];
-    //inet_ntoa_r(destAddr.sin_addr, addr_str, sizeof(addr_str) - 1);
-
-    const int client_sock =  lwip_socket( AF_INET, SOCK_STREAM, IPPROTO_IP );
-    if (client_sock < 0) {
-        ESP_LOGE(TAG, "Unable to create socket: %s", lwip_strerr( errno ) );
-        return;
-    }
-    ESP_LOGI(TAG, "Socket created");
-
-    while(1){
-        const int err = lwip_connect(client_sock, (struct sockaddr *)&destAddr, sizeof(destAddr));
-        if (err < 0) {
-            ESP_LOGE(TAG, "Socket unable to connect: %s", lwip_strerr( errno ) );
-            vTaskDelay( pdMS_TO_TICKS( 1000 ) );
-        }
-        else {
-            ESP_LOGI(TAG, "Successfully connected");
-            
-            while (1) {
-                {
-                    const int err = network_receive_packet( &client_sock );
-                    if( err < 0 ){
-                        ESP_LOGE( TAG, "recv failed: %d (%d)", err, errno );
-                        break;
-                    }
-                }
-                if( xEventGroupWaitBits( network_event_group, NETWORK_RECEIVE, pdTRUE, pdTRUE, 0 ) )
-                {
-                    //ESP_LOGI( TAG, "RECEIVE" );
-                    if( valid ){
-                        protocol_game_from_server( game_state, buffer, buffer_position );
-                         // Checa as regras -> munições / movimento
-                        buffer_position = 0;
-                        valid = false;
-                    }
-                    xEventGroupSetBits( network_event_group, NETWORK_RECEIVED );
-                }
-                if( receiving_state == RECEIVING_START ){
-                    if( xEventGroupWaitBits( network_event_group, NETWORK_SEND, pdTRUE, pdTRUE, 0 ) )
-                    {
-                        ////ESP_LOGI( TAG, "SEND" );
-                        //buffer_position = protocol_game_to_server( game_state, buffer, sizeof( buffer ) );
-                        //{
-                        //    const int err = network_send_packet( &client_sock );
-                        //    if ( err < 0 ) {
-                        //        ESP_LOGE( TAG, "Error occured during sending: %s", lwip_strerr( errno ) );
-                        //        break;
-                        //    }
-                        //}
-                        xEventGroupSetBits( network_event_group, NETWORK_SENT );
-                    }
-                }
-            }
-        }
-        if (client_sock != -1) {
-            lwip_shutdown(client_sock, 0);
-            lwip_close( client_sock );
-        }
-    }
-    vTaskDelete(NULL);
-}
-//-----------------------------------------------------------------------------------------
-static void network_process_tcp_server(void *pvParameters)
-{
-    game_state_t* game_state = pvParameters;
-    
-    const struct sockaddr_in destAddr = {
-        .sin_addr.s_addr = htonl(INADDR_ANY),
-        .sin_family = AF_INET,
-        .sin_port = htons(PORT)
-    };
-    
-    const int server_sock = lwip_socket( AF_INET, SOCK_STREAM, IPPROTO_IP );
-    if (server_sock < 0) {
-        ESP_LOGE( TAG, "Unable to create socket: %s", lwip_strerr( errno ) );
-        return;
-    }
-    ESP_LOGI( TAG, "Socket created" );
-    
-    {
-        const int err = lwip_bind(server_sock, (struct sockaddr *)&destAddr, sizeof(destAddr));
-        if (err < 0) {
-            ESP_LOGE( TAG, "Socket unable to bind: %s", lwip_strerr( errno ) );
-            return;
-        }
-        ESP_LOGI(TAG, "Socket binded");
-    }
-    {
-        const int err = lwip_listen(server_sock, 1);
-        if (err < 0) {
-            ESP_LOGE( TAG, "Error occured during listen: %s", lwip_strerr( errno ) );
-            return;
-        }
-        //ESP_LOGI( TAG, "Socket listening" );
-    }
-    while(1){
-
-        struct sockaddr_in6 sourceAddr;
-        uint addrLen = sizeof(sourceAddr);
-        const int client_sock = lwip_accept( server_sock, (struct sockaddr *)&sourceAddr, &addrLen );
-        if ( client_sock < 0 ) {
-            ESP_LOGE( TAG, "Unable to accept connection: %s", lwip_strerr( errno ) );
-            break;
-        }
-        ESP_LOGI( TAG, "Socket accepted" );
-        
-        while(1){
-            {
-                const int err = network_receive_packet( &client_sock );
-                if( err < 0 ){
-                    ESP_LOGE( TAG, "recv failed: %s", lwip_strerr( errno ) );
-                    break;
-                }
-            }
-            if( xEventGroupWaitBits( network_event_group, NETWORK_RECEIVE, pdTRUE, pdTRUE, 0 ) )
-            {
-                //ESP_LOGI( TAG, "RECEIVE" );
-                if( valid ){
-                    protocol_game_from_client( game_state, buffer, buffer_position ); 
-                    // Checa as regras -> munições / movimento
-                    buffer_position = 0;
-                    valid = false;
-                }
-                xEventGroupSetBits( network_event_group, NETWORK_RECEIVED );
-            }
-            if( receiving_state == RECEIVING_START ){
-                if( xEventGroupWaitBits( network_event_group, NETWORK_SEND, pdTRUE, pdTRUE, 0 ) )
-                {
-                    //ESP_LOGI( TAG, "SEND" );
-                    buffer_position = protocol_game_to_client( game_state, buffer, sizeof( buffer ) );
-                    {
-                        const int err = network_send_packet( &client_sock );
-                        if ( err < 0 ) {
-                            ESP_LOGE( TAG, "Error occured during sending: %s", lwip_strerr( errno ) );
-                            break;
-                        }
-                    }
-                    xEventGroupSetBits( network_event_group, NETWORK_SENT );
-                }
-            }
-        }
-        if (client_sock != -1) 
-        {
-            ESP_LOGE( TAG, "Shutting down socket and restarting...");
-            lwip_shutdown( client_sock, 0 );
-            lwip_close( client_sock );
-        }
-
-        //char* str = NULL;
-        //size_t len = 0;
-        //{
-        //    game_state_t* game_state;
-        //    if( xTaskNotifyWait( 0, ULONG_MAX, (uint32_t*)&game_state, portMAX_DELAY ) ){
-        //        
-        //        for( size_t index = 0; index < sizeof(game_state->spaceships)/sizeof(*game_state->spaceships); index++ ){
-        //            game_state->spaceships[ index ].active                  = 12;
-        //            game_state->spaceships[ index ].px                      = 123.456;
-        //            game_state->spaceships[ index ].py                      = 123.456;
-        //            game_state->spaceships[ index ].vi                      = 12.345;
-        //            game_state->spaceships[ index ].vj                      = 12.345;
-        //            game_state->spaceships[ index ].mode                    = 12;
-        //            game_state->spaceships[ index ].life                    = 12;
-        //            game_state->spaceships[ index ].collision_countdown     = 12345;
-        //            game_state->spaceships[ index ].collision_active        = 12;
-        //            game_state->spaceships[ index ].shield_active           = 12;
-        //            game_state->spaceships[ index ].shield_animation_number = 12;
-        //            game_state->spaceships[ index ].alive_timer             = 123456;
-        //            game_state->spaceships[ index ].asteroids_counter       = 12345;
-        //        }
-        //        for( size_t index = 0; index < sizeof(game_state->asteroids)/sizeof(*game_state->asteroids); index++ ){
-        //            game_state->asteroids[ index ].active                   = 12;
-        //            game_state->asteroids[ index ].px                       = 123.456;
-        //            game_state->asteroids[ index ].py                       = 123.456;
-        //            game_state->asteroids[ index ].vi                       = 12.345;
-        //            game_state->asteroids[ index ].vj                       = 12.345;
-        //            game_state->asteroids[ index ].number                   = 12;
-        //            game_state->asteroids[ index ].orientation              = 12;
-        //            game_state->asteroids[ index ].life                     = 12;
-        //            game_state->asteroids[ index ].damage_countdown         = 12345;
-        //            game_state->asteroids[ index ].damage_active            = 12;
-        //        }
-        //        for( size_t index = 0; index < sizeof(game_state->impacts)/sizeof(*game_state->impacts); index++ ){
-        //            game_state->impacts[ index ].active                     = 12;
-        //            game_state->impacts[ index ].px                         = 123.456;
-        //            game_state->impacts[ index ].py                         = 123.456;
-        //            game_state->impacts[ index ].type                       = 12;
-        //            game_state->impacts[ index ].size                       = 12;
-        //            game_state->impacts[ index ].animation_number           = 12;
-        //            game_state->impacts[ index ].animation_countdown        = 12345;
-        //        }
-        //        for( size_t index = 0; index < sizeof(game_state->projectiles)/sizeof(*game_state->projectiles); index++ ){
-        //            game_state->projectiles[ index ].active                 = 12;
-        //            game_state->projectiles[ index ].px                     = 123.456;
-        //            game_state->projectiles[ index ].py                     = 123.456;
-        //            game_state->projectiles[ index ].vi                     = 12.345;
-        //            game_state->projectiles[ index ].vj                     = 12.345;
-        //            game_state->projectiles[ index ].owner                  = 12;
-        //            game_state->projectiles[ index ].type                   = 12;
-        //            game_state->projectiles[ index ].animation_number       = 12;
-        //            game_state->projectiles[ index ].animation_countdown    = 12345;
-        //        }
-        //        for( size_t index = 0; index < sizeof(game_state->pickups)/sizeof(*game_state->pickups); index++ ){
-        //            game_state->pickups[ index ].active                     = 12;
-        //            game_state->pickups[ index ].px                         = 123.456;
-        //            game_state->pickups[ index ].py                         = 123.456;
-        //            game_state->pickups[ index ].vi                         = 12.345;
-        //            game_state->pickups[ index ].vj                         = 12.345;
-        //            game_state->pickups[ index ].type                       = 12;
-        //            game_state->pickups[ index ].trajectory_progress        = 12.345;
-        //        }
-        //        for( size_t index = 0; index < sizeof(game_state->meteors)/sizeof(*game_state->meteors); index++ ){
-        //            game_state->meteors[ index ].active                     = 12;
-        //            game_state->meteors[ index ].px                         = 123.456;
-        //            game_state->meteors[ index ].py                         = 123.456;
-        //            game_state->meteors[ index ].vi                         = 12.345;
-        //            game_state->meteors[ index ].vj                         = 12.345;
-        //            game_state->meteors[ index ].direction                  = 12;
-        //            game_state->meteors[ index ].animation_number           = 12;
-        //            game_state->meteors[ index ].animation_countdown        = 12345;
-        //            game_state->meteors[ index ].arrow_active               = 12;
-        //            game_state->meteors[ index ].arrow_countdown            = 12345;
-        //            game_state->meteors[ index ].arrow_progress             = 12.345;
-        //        }
-        //        
-        //        const int64_t start = esp_timer_get_time();
-        //        len = protocol_game_to_client( &str, game_state );
-        //        ////ESP_LOGI(TAG,"len = %zu",len);
-        //        //puts(str);
-        //        const int64_t end = esp_timer_get_time();
-        //        //ESP_LOGI(TAG,"t = %lld",end-start);
-        //    }
-        //}
-    }
-    vTaskDelete(NULL);
 }
 //-----------------------------------------------------------------------------------------
 static void network_initialize_common()
@@ -566,12 +132,15 @@ static void network_initialize_client( network_type_t type, game_state_t* game_s
     wait_for_ip();
     if( type == NETWORK_TCP )
     {
-        xTaskCreatePinnedToCore( network_process_tcp_client, "network_process_tcp_client", 4096, game_state, 5, &network_task_handle, 1 );
+        network_initialize_tcp_client( game_state );
+        func_send = network_tcp_send;
+        func_receive = network_tcp_receive;
     }
     else if( type == NETWORK_UDP )
     {
         //xTaskCreatePinnedToCore( network_process_udp_client, "network_process_udp_client", 4096, NULL, 5, &network_task_handle, 1 );
     }
+    
 }
 //-----------------------------------------------------------------------------------------
 static void network_initialize_server( network_type_t type, game_state_t* game_state )
@@ -592,7 +161,9 @@ static void network_initialize_server( network_type_t type, game_state_t* game_s
     //ESP_LOGI(TAG, "wifi_init_softap finished.SSID:%s password:%s", EXAMPLE_WIFI_SSID, EXAMPLE_WIFI_PASS);
     if( type == NETWORK_TCP )
     {
-        xTaskCreatePinnedToCore( network_process_tcp_server, "network_process_tcp_server", 4096, game_state, 5, &network_task_handle, 1 );
+        network_initialize_tcp_server( game_state );
+        func_send = network_tcp_send;
+        func_receive = network_tcp_receive;
     }
     else if( type == NETWORK_UDP )
     {
@@ -602,66 +173,34 @@ static void network_initialize_server( network_type_t type, game_state_t* game_s
 //-----------------------------------------------------------------------------------------
 void network_initialize( network_mode_t mode, network_type_t type, game_state_t* game_state )
 {
-    //ESP_LOGI(TAG,"initialize");
+    network_initialize_common();
     
-    //ESP_LOGI(TAG,"flags = %08X | %08X | %08X | %08X",NETWORK_RECEIVE,NETWORK_RECEIVED,NETWORK_SEND,NETWORK_SENT);
-    
-    if( network_task_handle == NULL )
-    {
-        network_event_group = xEventGroupCreate();
-        
-        network_initialize_common();
-        
-        if( mode == NETWORK_CLIENT ){ 
-            network_initialize_client( type, game_state );
-        }
-        else if( mode == NETWORK_SERVER ){
-            network_initialize_server( type, game_state );
-        }
+    if( mode == NETWORK_CLIENT ){ 
+        network_initialize_client( type, game_state );
+    }
+    else if( mode == NETWORK_SERVER ){
+        network_initialize_server( type, game_state );
     }
 }
 //-----------------------------------------------------------------------------------------
 void network_terminate()
-{
-    //ESP_LOGI(TAG,"terminate");
-    if( network_task_handle != NULL )
-    {
-        vTaskDelete( network_task_handle );
-        network_task_handle = NULL;
-    }
-}
-//-----------------------------------------------------------------------------------------
-void network_sync( game_state_t* game_state )
 {
     
 }
 //-----------------------------------------------------------------------------------------
 void network_send()
 {
-    if( network_task_handle != NULL )
+    if( func_send != NULL )
     {
-        if( ( xEventGroupGetBits( network_event_group ) & NETWORK_SEND ) == 0 ){
-            xEventGroupSetBits( network_event_group, NETWORK_SEND );
-            xEventGroupWaitBits( network_event_group, NETWORK_SENT, pdTRUE, pdTRUE, portMAX_DELAY );
-        }
-        else {
-            ESP_LOGE(TAG,"already SEND");
-        }
+        func_send();
     }
 }
 //-----------------------------------------------------------------------------------------
 void network_receive()
 {
-    if( network_task_handle != NULL )
-    {   
-        if( ( xEventGroupGetBits( network_event_group ) & NETWORK_RECEIVE ) == 0 ){
-            xEventGroupSetBits( network_event_group, NETWORK_RECEIVE );
-            xEventGroupWaitBits( network_event_group, NETWORK_RECEIVED, pdTRUE, pdTRUE, portMAX_DELAY );
-            
-        }
-        else {
-            ESP_LOGE(TAG,"already RECEIVE");
-        }
+    if( func_receive != NULL )
+    {
+        func_receive();
     }
 }
 //-----------------------------------------------------------------------------------------
