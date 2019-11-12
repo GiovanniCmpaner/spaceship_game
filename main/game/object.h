@@ -18,7 +18,7 @@ typedef enum {
 } direction_t;
 
 typedef struct {
-    bool active;
+    uint8_t active;
     float px;
     float py;
     float vi;
@@ -27,16 +27,16 @@ typedef struct {
     uint8_t mode;
     uint8_t life;
     uint16_t collision_countdown;
-    bool collision_active;
+    uint8_t collision_active;
     uint16_t ammunitions[4]; 
-    bool shield_active;
+    uint8_t shield_active;
     uint8_t shield_animation_number;
     uint32_t alive_timer;
     uint16_t asteroids_counter;
 } spaceship_control_t;
 
 typedef struct {
-    bool active;
+    uint8_t active;
     float px;
     float py;
     //impact_type_t type;
@@ -48,7 +48,7 @@ typedef struct {
 } impact_control_t;
 
 typedef struct {
-    bool active;
+    uint8_t active;
     float px;
     float py;
     float vi;
@@ -61,7 +61,7 @@ typedef struct {
 } projectile_control_t;
 
 typedef struct {
-    bool active;
+    uint8_t active;
     float px;
     float py;
     float vi;
@@ -71,11 +71,11 @@ typedef struct {
     uint8_t orientation;
     uint8_t life;
     uint32_t damage_countdown;
-    bool damage_active;
+    uint8_t damage_active;
 } asteroid_control_t;
 
 typedef struct {
-    bool active;
+    uint8_t active;
     float px;
     float py;
     float vi;
@@ -86,7 +86,7 @@ typedef struct {
 } pickup_control_t;
 
 typedef struct {
-    bool active;
+    uint8_t active;
     float px;
     float py;
     float vi;
@@ -95,7 +95,7 @@ typedef struct {
     uint8_t direction;
     uint8_t animation_number;
     uint32_t animation_countdown;
-    bool arrow_active;
+    uint8_t arrow_active;
     uint32_t arrow_countdown;
     float arrow_progress;
 } meteor_control_t;

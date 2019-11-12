@@ -87,7 +87,7 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
 //-----------------------------------------------------------------------------------------
 static void wait_for_ip()
 {
-    uint32_t bits = IPV4_GOTIP_BIT;// | IPV6_GOTIP_BIT ;
+    uint32_t bits = IPV4_GOTIP_BIT | IPV6_GOTIP_BIT ;
 
     //ESP_LOGI(TAG, "Waiting for AP connection...");
     xEventGroupWaitBits(wifi_event_group, bits, false, true, portMAX_DELAY);
@@ -101,15 +101,6 @@ static void network_initialize_common()
     tcpip_adapter_init();
     wifi_event_group = xEventGroupCreate();
     ESP_ERROR_CHECK( esp_event_loop_init(event_handler, NULL) );
-
-    ESP_ERROR_CHECK(tcpip_adapter_dhcps_stop(TCPIP_ADAPTER_IF_AP));
-    tcpip_adapter_ip_info_t info;
-	memset(&info, 0, sizeof(info));
-	IP4_ADDR(&info.ip, 192, 168, 4, 1);
-	IP4_ADDR(&info.gw, 192, 168, 4, 1);
-	IP4_ADDR(&info.netmask, 255, 255, 255, 0);
-	ESP_ERROR_CHECK(tcpip_adapter_set_ip_info(TCPIP_ADAPTER_IF_AP, &info));
-	ESP_ERROR_CHECK(tcpip_adapter_dhcps_start(TCPIP_ADAPTER_IF_AP));
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK( esp_wifi_init(&cfg) );
