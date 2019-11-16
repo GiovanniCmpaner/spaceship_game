@@ -26,8 +26,8 @@ static const char* tag = "main";
 void app_main();
 static void dorme();
 //-----------------------------------------------------------------------------------------
-void app_main(){
-    
+void app_main()
+{
     input_initialize();
     lcd_initialize();
     audio_initialize();

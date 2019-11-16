@@ -326,8 +326,8 @@ static void network_process_tcp_client( void *pvParameters )
     }
     ESP_LOGI(TAG, "socket created");
     
-    const int rcvbuf = 5000;
-    setsockopt( client_sock , SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
+    //const int rcvbuf = 5000;
+    //setsockopt( client_sock , SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
     
     const int err = lwip_bind( client_sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr) );
     if (err < 0)
@@ -336,9 +336,6 @@ static void network_process_tcp_client( void *pvParameters )
         return;
     }
     ESP_LOGI(TAG, "socket binded");
-
-    //const int opt = 10000;
-    //setsockopt( client_sock, SOL_SOCKET, SO_RCVBUF, &opt, sizeof(opt) );
 
     while(1)
     {

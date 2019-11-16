@@ -763,7 +763,7 @@ static void game_collide_meteors_spaceships_asteroids(){
             }
 
             if(spaceship_control->life > 0){
-                //spaceship_control->life--;
+                spaceship_control->life--;
                 spaceship_control->collision_countdown = 3000;
                 spaceship_control->collision_active = true;
             }
@@ -1090,7 +1090,7 @@ static void game_generate_meteor( uint32_t milliseconds ){
                 const image_t* meteor_image = image_meteor[ meteor_control->animation_number ][ IMAGE_ROTATED_0 ];
                 meteor_control->vi = 0.0;
                 meteor_control->vj = +6.0;
-                meteor_control->px = (double)( meteor_image->width + ( esp_random() % lcd_width() - 2 * meteor_image->width ) );
+                meteor_control->px = (double)( meteor_image->width + esp_random() % ( lcd_width() - 2 * meteor_image->width ) );
                 meteor_control->py = 0.0;
             }
             else if( meteor_control->direction == DIRECTION_LEFT ){
@@ -1098,14 +1098,14 @@ static void game_generate_meteor( uint32_t milliseconds ){
                 meteor_control->vi = -6.0;
                 meteor_control->vj = 0.0;
                 meteor_control->px = (double)( lcd_width() - 1 );
-                meteor_control->py = (double)( meteor_image->height + ( esp_random() % 162 - 2 * meteor_image->height ) );
+                meteor_control->py = (double)( meteor_image->height + esp_random() % ( 162 - 2 * meteor_image->height ) );
             }
             else if( meteor_control->direction == DIRECTION_RIGHT ){
                 const image_t* meteor_image = image_meteor[ meteor_control->animation_number ][ IMAGE_ROTATED_90 ];
                 meteor_control->vi = +6.0;
                 meteor_control->vj = 0.0;
                 meteor_control->px = 0.0;
-                meteor_control->py = (double)( meteor_image->height + ( esp_random() % 162 - 2 * meteor_image->height ) );
+                meteor_control->py = (double)( meteor_image->height + esp_random() % ( 162 - 2 * meteor_image->height ) );
             }
             else if( meteor_control->direction == DIRECTION_UP ){
                 const image_t* meteor_image = image_meteor[ meteor_control->animation_number ][ IMAGE_ROTATED_180 ];
@@ -1209,7 +1209,7 @@ static void game_generate_asteroid( uint32_t milliseconds ){
             }
             const image_t* asteroid_image = image_asteroids[ asteroid_control->number ][ asteroid_control->orientation ][ 0 ];
 			asteroid_control->px = lcd_width() - 1;
-			asteroid_control->py = esp_random() % 162;
+			asteroid_control->py = asteroid_image->height + esp_random() % ( 162 - 2 * asteroid_image->height );
 			asteroid_control->vi = - (double)( ( game_state.play_timer > 60000 ? 3 : 1 ) + esp_random() % 3 );
             asteroid_control->vj = 0;
             break;
