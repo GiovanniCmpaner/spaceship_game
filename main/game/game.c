@@ -22,6 +22,7 @@
 #include "lcd.h"
 #include "font.h"
 #include "spaceship.h"
+#include "background.h"
 #include "asteroid.h"
 #include "info.h"
 #include "shield.h"
@@ -260,7 +261,7 @@ static void game_move_projectiles( uint32_t milliseconds ){
         if(    (int16_t)projectile_control->px + projectile_image->width < 0
             || (int16_t)projectile_control->py + projectile_image->height < 0
             || (int16_t)projectile_control->px >= lcd_width() 
-            || (int16_t)projectile_control->py >= lcd_height() ){
+            || (int16_t)projectile_control->py >= 162 ){
             projectile_control->active = false;
         }
     }
@@ -299,7 +300,7 @@ static void game_move_asteroids( uint32_t milliseconds ){
         if(    (int16_t)asteroid_control->px + asteroid_image->width < 0
             || (int16_t)asteroid_control->py + asteroid_image->height < 0
             || (int16_t)asteroid_control->px >= lcd_width() 
-            || (int16_t)asteroid_control->py >= lcd_height() ){
+            || (int16_t)asteroid_control->py >= 162 ){
             asteroid_control->active = false;
         }
     }
@@ -326,7 +327,7 @@ static void game_move_pickups( uint32_t milliseconds ){
         if(    (int16_t)pickup_control->px + pickup_image->width < 0
             || (int16_t)pickup_control->py + pickup_image->height < 0
             || (int16_t)pickup_control->px >= lcd_width() 
-            || (int16_t)pickup_control->py >= lcd_height() ){
+            || (int16_t)pickup_control->py >= 162 ){
             pickup_control->active = false;
         }
     }
@@ -353,8 +354,8 @@ static void game_move_spaceships( uint32_t milliseconds ){
                 spaceship_control->px = 0.00;
             }
             
-            if(spaceship_control->py > ( lcd_height() - spaceship_image->height - 1 )){
-                spaceship_control->py = ( lcd_height() - spaceship_image->height - 1 );
+            if(spaceship_control->py > ( 162 - spaceship_image->height - 1 )){
+                spaceship_control->py = ( 162 - spaceship_image->height - 1 );
             }
             else if(spaceship_control->py <= 0.00){
                 spaceship_control->py = 0.00;
@@ -501,7 +502,7 @@ static void game_move_meteors( uint32_t milliseconds ){
             if(    (int16_t)meteor_control->px + meteor_image->width < 0
                 || (int16_t)meteor_control->py + meteor_image->height < 0
                 || (int16_t)meteor_control->px >= lcd_width() 
-                || (int16_t)meteor_control->py >= lcd_height() ){
+                || (int16_t)meteor_control->py >= 162 ){
                 meteor_control->active = false;
             }
         }
@@ -676,7 +677,7 @@ static void game_collide_spaceships_asteroids(){
             }
 
             if(spaceship_control->life > 0){
-                //spaceship_control->life--;
+                spaceship_control->life--;
                 spaceship_control->collision_countdown = 3000;
                 spaceship_control->collision_active = true;
             }
@@ -852,15 +853,48 @@ static void game_draw_spaceships(){
     }
 }
 //-----------------------------------------------------------------------------------------
-static void game_draw_background(){
+static void game_draw_background()
+{
+    static const image_t* current_background = &image_background_normal;
+    static const image_t* next_background = &image_background_normal;
+    
+    static bool transition = false;
+    static bool transitioning = false;
+    static bool transitioned = false;
+    if( ! transition && game_state.play_timer > 30000 )
+    {
+        transition = true;
+    }
+
     static double i = 0.0;
-    lcd_draw_image( -i, 0, &image_space );
-    if( i > image_space.width - lcd_width() ){
-        lcd_draw_image( -i + image_space.width, 0, &image_space );
+    lcd_draw_image( -i, 0, current_background );
+    if( i > current_background->width - lcd_width() ){
+        lcd_draw_image( -i + current_background->width, 0, next_background );
     }
     i += fps / 45.0;
-    if( i >= image_space.width ){
+    if( i >= current_background->width ){
         i = 0.0;
+        if( transition )
+        {
+            if( !transitioned )
+            {
+                if( !transitioning )
+                {
+                    transitioning = true;
+                    next_background = &image_background_transition;
+                }
+                else 
+                {
+                    transitioned = true;
+                    current_background = &image_background_transition;
+                    next_background = &image_background_red;
+                }
+            }
+            else 
+            {
+                current_background = &image_background_red;
+            }
+        }
     }
 }
 //-----------------------------------------------------------------------------------------
@@ -938,7 +972,7 @@ static void game_draw_meteors(){
                 const image_t* arrow_image = image_arrow[ IMAGE_ROTATED_270 ];
                 
                 double py = meteor_control->py - arrow_image->height + meteor_control->arrow_progress;
-                while( py < lcd_height() + arrow_image->height ){
+                while( py < 162 + arrow_image->height ){
                     lcd_draw_image( meteor_control->px, py, arrow_image );
                     py += arrow_image->height;
                 }
@@ -1013,24 +1047,29 @@ static void game_draw_infos(){
 //-----------------------------------------------------------------------------------------
 static void game_draw(){
     game_draw_background();
-    game_draw_spaceships();
     game_draw_asteroids();
     game_draw_impacts();
     game_draw_projectiles();
     game_draw_pickups();
     game_draw_meteors();
+    game_draw_spaceships();
     game_draw_infos();
     lcd_refresh();
 }
 //-----------------------------------------------------------------------------------------
 static void game_generate_meteor( uint32_t milliseconds ){
-    static uint32_t generator_countdown = 1000;
+    if( game_state.play_timer < 30000 )
+    {
+        return;
+    }
+    
+    static uint32_t generator_countdown = 5000;
     
     if( generator_countdown > milliseconds ){
         generator_countdown -= milliseconds;
     }
     else {
-        generator_countdown = 1000;
+        generator_countdown = 5000;
         
         for(size_t n = 0; n < sizeof(game_state.meteors)/sizeof(*game_state.meteors); n++){
             meteor_control_t* meteor_control = &game_state.meteors[n];
@@ -1059,21 +1098,21 @@ static void game_generate_meteor( uint32_t milliseconds ){
                 meteor_control->vi = -6.0;
                 meteor_control->vj = 0.0;
                 meteor_control->px = (double)( lcd_width() - 1 );
-                meteor_control->py = (double)( meteor_image->height + ( esp_random() % lcd_height() - 2 * meteor_image->height ) );
+                meteor_control->py = (double)( meteor_image->height + ( esp_random() % 162 - 2 * meteor_image->height ) );
             }
             else if( meteor_control->direction == DIRECTION_RIGHT ){
                 const image_t* meteor_image = image_meteor[ meteor_control->animation_number ][ IMAGE_ROTATED_90 ];
                 meteor_control->vi = +6.0;
                 meteor_control->vj = 0.0;
                 meteor_control->px = 0.0;
-                meteor_control->py = (double)( meteor_image->height + ( esp_random() % lcd_height() - 2 * meteor_image->height ) );
+                meteor_control->py = (double)( meteor_image->height + ( esp_random() % 162 - 2 * meteor_image->height ) );
             }
             else if( meteor_control->direction == DIRECTION_UP ){
                 const image_t* meteor_image = image_meteor[ meteor_control->animation_number ][ IMAGE_ROTATED_180 ];
                 meteor_control->vi = 0.0;
                 meteor_control->vj = -6.0;
                 meteor_control->px = (double)( meteor_image->width + ( esp_random() % lcd_width() - 2 * meteor_image->width ) );
-                meteor_control->py = (double)( lcd_height() - 1 );
+                meteor_control->py = (double)( 162 - 1 );
             }
             break;
         }
@@ -1087,7 +1126,14 @@ static void game_generate_pickup( uint32_t milliseconds ){
         generator_countdown -= milliseconds;
     }
     else {
-        generator_countdown = 10000;
+        if( game_state.play_timer > 80000 )
+        {
+            generator_countdown = 5000;
+        }
+        else 
+        {
+            generator_countdown = 10000;
+        }
         
         for(size_t n = 0; n < sizeof(game_state.pickups)/sizeof(*game_state.pickups); n++){
             pickup_control_t* pickup_control = &game_state.pickups[n];
@@ -1101,7 +1147,7 @@ static void game_generate_pickup( uint32_t milliseconds ){
             
             const image_t* pickup_image = image_pickups[ pickup_control->type ];
 			pickup_control->px = lcd_width() - 1;
-			pickup_control->py = ( pickup_image->height / 2 ) + esp_random() % ( lcd_height() - pickup_image->height );
+			pickup_control->py = ( pickup_image->height ) + esp_random() % ( 162 - pickup_image->height * 2 );
             pickup_control->vi = - (double)( 2 + esp_random() % 3 );
             pickup_control->vj = 2.0 + ( esp_random() % 4 ) / 4.0;
             pickup_control->trajectory_progress = 0.0;
@@ -1117,7 +1163,14 @@ static void game_generate_asteroid( uint32_t milliseconds ){
         generator_countdown -= milliseconds;
     }
     else {
-        generator_countdown = 1000;
+        if( game_state.play_timer > 40000 )
+        {
+            generator_countdown = 500;
+        }
+        else 
+        {
+            generator_countdown = 1000;
+        }
         
         for(size_t n = 0; n < sizeof(game_state.asteroids)/sizeof(*game_state.asteroids); n++){
             asteroid_control_t* asteroid_control = &game_state.asteroids[n];
@@ -1156,8 +1209,8 @@ static void game_generate_asteroid( uint32_t milliseconds ){
             }
             const image_t* asteroid_image = image_asteroids[ asteroid_control->number ][ asteroid_control->orientation ][ 0 ];
 			asteroid_control->px = lcd_width() - 1;
-			asteroid_control->py = esp_random() % lcd_height();
-			asteroid_control->vi = - (double)( 1 + esp_random() % 3 );
+			asteroid_control->py = esp_random() % 162;
+			asteroid_control->vi = - (double)( ( game_state.play_timer > 60000 ? 3 : 1 ) + esp_random() % 3 );
             asteroid_control->vj = 0;
             break;
         }
@@ -1208,28 +1261,14 @@ static void game_process( void *pvParameters ){
         last_wake_time = current_wake_time;
         game_state.play_timer += milliseconds;
         
-        if( mode != GAME_CLIENT )
-        {
-            game_receive();
-        }
-        else {
-            game_send();
-        }
+        game_receive();
         game_input(); // task -> wait( BIT_REFRESH )
         game_move( milliseconds ); // task -> wait( BIT_REFRESH | BIT_INPUT )
-        if( mode != GAME_CLIENT )
-        {
-            game_generate( milliseconds ); // task -> wait( BIT_REFRESH )
-        }
+        game_generate( milliseconds ); // task -> wait( BIT_REFRESH )
         game_collide(); // task -> wait( BIT_REFRESH | BIT_MOVE )
         game_draw(); // task -> wait( BIT_REFRESH | BIT_INPUT | BIT_MOVE | BIT_GENERATE )
-        if( mode != GAME_CLIENT )
-        {
-            game_send();
-        }
-        else {
-            game_receive();
-        }
+        game_send();
+
         vTaskDelayUntil( &current_wake_time, interval );
     }
 }

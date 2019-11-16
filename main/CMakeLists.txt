@@ -20,7 +20,7 @@ set(COMPONENT_SRCS "jogo_nave_main.c"
                    "image/pickup.c"
                    "image/projectile.c"
                    "image/shield.c"
-                   "image/space.c"
+                   "image/background.c"
                    "image/spaceship.c"
                    "lcd/lcd.c"
                    "lcd/lcd_spi.c")
