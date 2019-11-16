@@ -28,7 +28,7 @@
 #include "network_tcp.h"
 
 //-----------------------------------------------------------------------------------------
-#define EXAMPLE_WIFI_SSID "WORKGROUP2"
+#define EXAMPLE_WIFI_SSID "WORKGROUP"
 #define EXAMPLE_WIFI_PASS "49WNN7F3CD@22"
 #define EXAMPLE_MAX_STA_CONN 2
 //-----------------------------------------------------------------------------------------
@@ -87,7 +87,7 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
 //-----------------------------------------------------------------------------------------
 static void wait_for_ip()
 {
-    uint32_t bits = IPV4_GOTIP_BIT | IPV6_GOTIP_BIT ;
+    uint32_t bits = IPV4_GOTIP_BIT;
 
     //ESP_LOGI(TAG, "Waiting for AP connection...");
     xEventGroupWaitBits(wifi_event_group, bits, false, true, portMAX_DELAY);

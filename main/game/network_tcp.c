@@ -30,7 +30,7 @@
 #include "protocol.h"
 
 //-----------------------------------------------------------------------------------------
-//#define HOST_IP_ADDR "192.168.4.1" //"fe80::1400:4639:cc8d:3033" //"fe80::a650:46ff:feeb:efe8" 
+#define HOST_IP_ADDR "192.168.1.109"
 #define PORT 5000
 //-----------------------------------------------------------------------------------------
 static const char* TAG = "network_tcp";
@@ -50,177 +50,203 @@ static const size_t receive_buffer_size = 10000;
 static char* receive_buffer = NULL;
 static size_t receive_position = 0;
 static bool receive_valid = false;
-static bool receive_started = false;
 static bool receive_completed = true;
-
-static int64_t  timeout_timer = 0;
+static int64_t receive_timeout = 0;
+static size_t receive_packet_end = 0;
 
 static const size_t send_buffer_size = 10000;
 static char* send_buffer = NULL;
 static size_t send_position = 0;
 static bool send_completed = true;
+static size_t send_packet_end = 0;
 
-
-
+//-----------------------------------------------------------------------------------------
+static void network_process_tcp_next_receive( )
+{
+    receive_completed = false;
+    receive_valid = false;
+    receive_packet_end = 0;
+    receive_timeout = 0;
+    
+    if( receive_packet_end < receive_position - 1 )
+    {
+        memmove( receive_buffer + 0, receive_buffer + receive_packet_end  + 1, receive_position - receive_packet_end );
+        receive_position -= receive_packet_end + 1;
+    }
+    else
+    {
+        receive_position = 0;
+    }
+}
 //-----------------------------------------------------------------------------------------
 static bool network_process_tcp_receive_packet( int sock )
 {
-    if( ! receive_completed )
+    if( receive_completed )
     {
-        while( 1 )
+        return true;
+    }
+
+    struct sockaddr_in source_addr;
+    socklen_t socklen = sizeof(source_addr);
+    
+    const int length_received = lwip_recvfrom( 
+        sock, 
+        receive_buffer + receive_position, 
+        receive_buffer_size - receive_position, 
+        MSG_DONTWAIT, 
+        (struct sockaddr *)&source_addr, 
+        &socklen 
+    );
+    //ESP_LOGI( TAG, "length_received = %d / errno = %d", length_received, errno );
+    if( length_received < 0 )
+    {
+        if( errno == EAGAIN )
         {
-            ESP_LOGI( TAG, "receive_packet" );
-            
-            uint8_t data;
-            //const int length_received = lwip_recv( sock, &data, 1, MSG_DONTWAIT );
-            struct sockaddr_in6 source_addr; // Large enough for both IPv4 or IPv6
-            socklen_t socklen = sizeof(source_addr);
-            const int length_received = lwip_recvfrom( sock, &data, 1, 0, (struct sockaddr *)&source_addr, &socklen );
-            if( length_received < 0 )
+            return true;
+        }
+        ESP_LOGE( TAG, "recv error: errno %d", errno );
+        receive_position = 0;
+        receive_completed = false;
+        receive_valid = false;
+        return false;
+    }
+    if( length_received == 0 )
+    {
+        if( receive_position != 0 && esp_timer_get_time() - receive_timeout > 50000 )
+        {
+            ESP_LOGE( TAG, "timeout" );
+            receive_position = 0;
+        }
+        return true;
+    }
+    receive_timeout = esp_timer_get_time();
+    receive_position += length_received;
+    
+    while( 1 )
+    {
+        size_t start = SIZE_MAX;
+        size_t end = SIZE_MAX;
+        
+        for( size_t n = 0; n < receive_position; n++ )
+        {
+            if( *( receive_buffer + n ) == '\x02' )
             {
-                if( errno != EAGAIN )
-                {
-                    ESP_LOGE( TAG, "recv error: errno %d", errno );
-                    receive_position = 0;
-                    receive_started = false;
-                    receive_completed = false;
-                    receive_valid = false;
-                    return false;
-                }
-                else 
+                start = n;
+                end = SIZE_MAX;
+            }
+            if( *( receive_buffer + n ) == '\x03' )
+            {
+                end = n;
+                if( end > start )
                 {
                     break;
                 }
             }
-            else if( length_received == 0 )
+        }
+        if( start == SIZE_MAX || end == SIZE_MAX )
+        {
+            break;
+        }
+        
+        if( start > 0 ){
+            if( start < receive_position )
             {
-                ESP_LOGI( TAG, "length_received == 0 " );
-                break;
+                memmove( receive_buffer + 0, receive_buffer + start, receive_position - start + 1 );
+                receive_position -= start;
             }
-            else if( length_received > 0 )
+            else
             {
-                ESP_LOGI( TAG, "length_received > 0 " );
-                
-                printf("%c",data);
-                
-                if( data == '\x02' )
-                {
-                    ESP_LOGE( TAG, "receive start" );
-                    
-                    if( receive_started )
-                    {
-                        ESP_LOGE( TAG, "receive overflow" );
-                    }
-                    receive_position = 0;
-                    receive_started = true;
-                    receive_completed = false;
-                    receive_valid = false;
-                }
-                if( receive_started )
-                {
-                    if( receive_position < receive_buffer_size - 1 )
-                    {
-                        *( receive_buffer + receive_position++ ) = data;
-                    }
-                    if( data == '\x03' )
-                    {
-                        ESP_LOGE( TAG, "receive end" );
-                        
-                        receive_started = false;
-                        receive_completed = true;
-                        receive_valid = false;
+                receive_position = 0;
+            }
+            end -= start;
+            start = 0;
+        }
+        
+        //---------------------------------------------------------------------------------------
+        receive_completed = true;
+        receive_valid = false;
 
-                        uint32_t crc;
-                        uint16_t length;
-                        
-                        sscanf( receive_buffer + 1, "%08X", &crc );
-                        sscanf( receive_buffer + 10, "%04hX", &length );
-                        
-                        const uint32_t crc_calculated = crc32_be( 0, (const uint8_t*)( receive_buffer + 15 ), length );
-                        
-                        //for( size_t n = 0; n < 16 + length; n++ )
-                        //{
-                        //    if( n % 80 == 0 )
-                        //        printf("\n");
-                        //    
-                        //    if( receive_buffer[n] > 32 && receive_buffer[n] < 127 )
-                        //        printf("%c ", receive_buffer[n] );
-                        //    else
-                        //        printf("<%02X> ", receive_buffer[n] );
-                        //}
-                        
-                        if( crc == crc_calculated )
-                        {
-                            receive_valid = true;
-                        }
-                        else 
-                        {
-                            ESP_LOGE( TAG, "crc mismatch" );
-                            receive_position = 0;
-                        }
-                        break;
-                    }
-                }
+        if( end - start >= 16 ){
+            uint32_t crc;
+            uint16_t length;
+            
+            sscanf( receive_buffer + 1, "%08X", &crc );
+            sscanf( receive_buffer + 10, "%04hX", &length );
+            
+            const uint32_t crc_calculated = crc32_be( 0, (const uint8_t*)( receive_buffer + 15 ), length );
+            
+            //----------
+            for( size_t n = 0; n < 16 + length; n++ )
+            {
+                if( n % 80 == 0 )
+                    printf("\n");
+                
+                if( receive_buffer[n] > 32 && receive_buffer[n] < 127 )
+                    printf("%c ", receive_buffer[n] );
+                else
+                    printf("<%02X> ", receive_buffer[n] );
+            }
+            //----------
+            
+            if( crc == crc_calculated )
+            {
+                receive_valid = true;
+                receive_packet_end = end;
+            }
+            else 
+            {
+                ESP_LOGE( TAG, "crc mismatch" );
             }
         }
+        //---------------------------------------------------------------------------------------
     }
-    //if( receive_state != RECEIVE_START && receive_state != RECEIVE_COMPLETE && esp_timer_get_time() - timeout_timer > 1000 )
-    //{
-    //    ESP_LOGE( TAG, "timeout" );
-    //    receive_position = 0;
-    //    receive_state = RECEIVE_START;
-    //}
     return true;
+}
+//-----------------------------------------------------------------------------------------
+static void network_process_tcp_next_send( )
+{
+    send_position = 0;
+    send_completed = false;
 }
 //-----------------------------------------------------------------------------------------
 static bool network_process_tcp_send_packet( int sock )
 {
-    if( ! send_completed )
+    if( send_completed )
     {
-        uint16_t length;
-        sscanf( send_buffer + 10, "%04hX", &length );
-        
-        while( 1 )
+        return true;
+    }
+
+    if( send_position < send_packet_end )
+    {
+        const struct sockaddr_in dest_addr = {
+            .sin_addr.s_addr = inet_addr(HOST_IP_ADDR),
+            .sin_family = AF_INET,
+            .sin_port = htons(PORT)
+        };
+
+        const int length_sent = lwip_sendto( sock, send_buffer, send_packet_end - send_position, MSG_DONTWAIT, (struct sockaddr *)&dest_addr, sizeof(dest_addr) );
+        if ( length_sent < 0 )
         {
-            if( send_position < 16 + length )
+            if( errno != EAGAIN )
             {
-                struct sockaddr_in6 dest_addr;
-                inet6_aton( "fe80::3e71:bfff:fe58:5658", &dest_addr.sin6_addr );
-                dest_addr.sin6_family = AF_INET6;
-                dest_addr.sin6_port = htons(PORT);
-                
-                //const int length_sent = lwip_send( sock, send_buffer, 16 + length - send_position, MSG_DONTWAIT );
-                const int length_sent = lwip_sendto( sock, send_buffer, 16 + length - send_position, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr) );
-                if ( length_sent < 0 )
-                {
-                    if( errno != EAGAIN )
-                    {
-                        ESP_LOGE( TAG, "send error: errno %d", errno );
-                        send_position = 0;
-                        send_completed = true;
-                        return false;
-                    }
-                    else 
-                    {
-                        break;
-                    }
-                }
-                else if( length_sent == 0 )
-                {
-                    break;
-                }
-                else if ( length_sent > 0 )
-                {
-                    send_position += length_sent;
-                }
-            }
-            if( send_position == 16 + length )
-            {
+                ESP_LOGE( TAG, "send error: errno %d", errno );
                 send_position = 0;
                 send_completed = true;
-                break;
+                return false;
             }
         }
+        if ( length_sent == 0 )
+        {
+            return true;
+        }
+        send_position += length_sent;
+        ESP_LOGI( TAG, "sent = %u", length_sent );
+    }
+    if( send_position >= send_packet_end )
+    {
+        send_packet_end = 0;
+        send_position = 0;
+        send_completed = true;
     }
     return true;
 }
@@ -232,7 +258,9 @@ static void network_tcp_prepare_send( uint16_t length )
     sprintf( send_buffer + 10, "%04X", length );
     *( send_buffer + 15 + length ) = '\x03';
 
-    ESP_LOGI( TAG, "send_packet" );
+    send_packet_end = 16 + length;
+
+    //ESP_LOGI( TAG, "send_packet" );
 
     //for( size_t n = 0; n < 16 + length; n++ )
     //{
@@ -252,16 +280,13 @@ static void network_process_tcp_client_receive_event( game_state_t* game_state )
     {
         if( receive_completed )
         {
-            ESP_LOGI( TAG, "process_tcp_client_receive_event" );
-            if( receive_valid )
-            {
-                protocol_game_from_server( game_state, receive_buffer + 15, receive_position - 16 ); 
-            }    
-            // Checa as regras -> munições / movimento
-            receive_position = 0;
-            receive_started = false;
-            receive_completed = false;
-            receive_valid = false;
+            //ESP_LOGI( TAG, "process_tcp_client_receive_event" );
+            //if( receive_valid )
+            //{
+            //    protocol_game_from_server( game_state, receive_buffer + 15, receive_position - 16 ); 
+            //}    
+            //// Checa as regras -> munições / movimento
+            //network_process_tcp_next_receive();
         }
         xEventGroupClearBits( network_event_group, NETWORK_RECEIVE );
         xEventGroupSetBits( network_event_group, NETWORK_RECEIVED );
@@ -274,12 +299,9 @@ static void network_process_tcp_client_send_event( game_state_t* game_state )
     {
         if( send_completed )
         {
-            ESP_LOGI( TAG, "process_tcp_client_send_event" );
-        
-            //network_tcp_prepare_send( protocol_game_to_server( game_state, send_buffer + 15, send_buffer_size - 16 ) );
+            network_tcp_prepare_send( protocol_game_to_server( game_state, send_buffer + 15, send_buffer_size - 16 ) );
             // Checa as regras -> munições / movimento
-            //send_position = 0;
-            //send_state = SEND_START;
+            network_process_tcp_next_send();
         }
         xEventGroupClearBits( network_event_group, NETWORK_SEND );
         xEventGroupSetBits( network_event_group, NETWORK_SENT );
@@ -290,54 +312,49 @@ static void network_process_tcp_client( void *pvParameters )
 {
     game_state_t* game_state = pvParameters;
 
-    //const struct sockaddr_in dest_addr = {
-    //    .sin_addr.s_addr = inet_addr(HOST_IP_ADDR),
-    //    .sin_family = AF_INET,
-    //    .sin_port = htons(PORT)
-    //};
+    const struct sockaddr_in dest_addr = {
+        .sin_addr.s_addr = htonl(INADDR_ANY),
+        .sin_family = AF_INET,
+        .sin_port = htons(PORT)
+    };
 
-    //const int client_sock =  lwip_socket( AF_INET, SOCK_STREAM, IPPROTO_IP );
-    const int client_sock = lwip_socket( AF_INET6, SOCK_DGRAM, IPPROTO_IPV6 );
+    const int client_sock = lwip_socket( AF_INET, SOCK_DGRAM, IPPROTO_IP );
     if (client_sock < 0)
     {
-        ESP_LOGE(TAG, "Unable to create socket: %s", lwip_strerr( errno ) );
+        ESP_LOGE(TAG, "unable to create socket: %s", lwip_strerr( errno ) );
         return;
     }
     ESP_LOGI(TAG, "socket created");
+    
+    const int rcvbuf = 5000;
+    setsockopt( client_sock , SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
+    
+    const int err = lwip_bind( client_sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr) );
+    if (err < 0)
+    {
+        ESP_LOGE( TAG, "socket unable to bind: %s", lwip_strerr( errno ) );
+        return;
+    }
+    ESP_LOGI(TAG, "socket binded");
 
     //const int opt = 10000;
     //setsockopt( client_sock, SOL_SOCKET, SO_RCVBUF, &opt, sizeof(opt) );
 
-    while(1){
-        //const int err = lwip_connect(client_sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-        //if (err < 0)
-        //{
-        //    ESP_LOGE(TAG, "Socket unable to connect: %s", lwip_strerr( errno ) );
-        //    vTaskDelay( pdMS_TO_TICKS( 1000 ) );
-        //}
-        //else 
-        //{
-        //    ESP_LOGI(TAG, "Successfully connected");
-        //    
-            xEventGroupSetBits( network_event_group, NETWORK_CONNECTED );
-            while (1) {
-                ESP_LOGI( TAG, "process_client" );
-                
-                if( ! network_process_tcp_receive_packet( client_sock ) )
-                {
-                    break;
-                }
-                if( ! network_process_tcp_send_packet( client_sock ) )
-                {
-                    break;
-                }
-                network_process_tcp_client_receive_event( game_state );
-                network_process_tcp_client_send_event( game_state );
-                
-                vTaskDelay( pdMS_TO_TICKS( 50 ) );
+    while(1)
+    {
+        xEventGroupSetBits( network_event_group, NETWORK_CONNECTED );
+        while (1) {
+            if( ! network_process_tcp_receive_packet( client_sock ) || ! network_process_tcp_send_packet( client_sock ) )
+            {
+                break;
             }
-            xEventGroupClearBits( network_event_group, NETWORK_CONNECTED );
-        //}
+            network_process_tcp_client_receive_event( game_state );
+            network_process_tcp_client_send_event( game_state );
+            
+            vTaskDelay( pdMS_TO_TICKS( 10 ) );
+        }
+        xEventGroupClearBits( network_event_group, NETWORK_CONNECTED );
+
         if ( client_sock != -1 ) {
             ESP_LOGE( TAG, "Shutting down socket and restarting...");
             lwip_shutdown( client_sock, 0 );
@@ -353,12 +370,9 @@ static void network_process_tcp_server_receive_event( game_state_t* game_state )
     {
         if( receive_completed )
         {
-            ESP_LOGI( TAG, "process_tcp_server_receive_event" );
-            
-            //protocol_game_from_client( game_state, receive_buffer + 15, receive_position - 16 ); 
-            //// Checa as regras -> munições / movimento
-            //receive_position = 0;
-            //receive_state = RECEIVE_START;
+            protocol_game_from_client( game_state, receive_buffer + 15, receive_position - 16 ); 
+            // Checa as regras -> munições / movimento
+            network_process_tcp_next_receive();
         }
         xEventGroupClearBits( network_event_group, NETWORK_RECEIVE );
         xEventGroupSetBits( network_event_group, NETWORK_RECEIVED );
@@ -371,16 +385,9 @@ static void network_process_tcp_server_send_event( game_state_t* game_state )
     {
         if( send_completed )
         {
-            ESP_LOGI( TAG, "process_tcp_server_send_event" );
-            
-            //{
-            //    memcpy( send_buffer + 7, "{ \"teste\": \"teste\" }", 20 );
-            //    network_tcp_prepare_send( 20 );
-            //}
             network_tcp_prepare_send( protocol_game_to_client( game_state, send_buffer + 15, send_buffer_size - 16 ) );
             // Checa as regras -> munições / movimento
-            send_position = 0;
-            send_completed = false;
+            network_process_tcp_next_send();
         }
         xEventGroupClearBits( network_event_group, NETWORK_SEND );
         xEventGroupSetBits( network_event_group, NETWORK_SENT );
@@ -391,12 +398,13 @@ static void network_process_tcp_server( void *pvParameters )
 {
     game_state_t* game_state = pvParameters;
     
-    struct sockaddr_in6 dest_addr;
-    bzero(&dest_addr.sin6_addr.un, sizeof(dest_addr.sin6_addr.un));
-    dest_addr.sin6_family = AF_INET6;
-    dest_addr.sin6_port = htons(PORT);
+    const struct sockaddr_in dest_addr = {
+        .sin_addr.s_addr = htonl(INADDR_ANY),
+        .sin_family = AF_INET,
+        .sin_port = htons(PORT)
+    };
     
-    const int server_sock = lwip_socket( AF_INET6, SOCK_DGRAM, IPPROTO_IPV6 );
+    const int server_sock = lwip_socket( AF_INET, SOCK_DGRAM, IPPROTO_IP );
     if (server_sock < 0)
     {
         ESP_LOGE( TAG, "unable to create socket: %s", lwip_strerr( errno ) );
@@ -413,42 +421,22 @@ static void network_process_tcp_server( void *pvParameters )
         }
         ESP_LOGI(TAG, "socket binded");
     }
-    //{
-    //    const int err = lwip_listen(server_sock, 1);
-    //    if (err < 0)
-    //    {
-    //        ESP_LOGE( TAG, "Error occured during listen: %s", lwip_strerr( errno ) );
-    //        return;
-    //    }
-    //    //ESP_LOGI( TAG, "socket listening" );
-    //}
+
     while(1)
     {
-        //struct sockaddr_in6 sourceAddr;
-        //uint addrLen = sizeof(sourceAddr);
-        //const int client_sock = lwip_accept( server_sock, (struct sockaddr *)&sourceAddr, &addrLen );
-        //if ( client_sock < 0 )
-        //{
-        //    ESP_LOGE( TAG, "unable to accept connection: %s", lwip_strerr( errno ) );
-        //    vTaskDelay( pdMS_TO_TICKS( 1000 ) );
-        //}
-        //else
-        //{
-        //    ESP_LOGI( TAG, "socket accepted" );
-            
-            xEventGroupSetBits( network_event_group, NETWORK_CONNECTED );
-            while(1){
-                if( ! network_process_tcp_receive_packet( server_sock ) || ! network_process_tcp_send_packet( server_sock ) )
-                {
-                    break;
-                }
-                network_process_tcp_server_receive_event( game_state );
-                network_process_tcp_server_send_event( game_state );
-                
-                vTaskDelay( pdMS_TO_TICKS( 50 ) );
+        xEventGroupSetBits( network_event_group, NETWORK_CONNECTED );
+        while(1){
+            if( ! network_process_tcp_receive_packet( server_sock ) || ! network_process_tcp_send_packet( server_sock ) )
+            {
+                break;
             }
-            xEventGroupClearBits( network_event_group, NETWORK_CONNECTED );
-        //}
+            network_process_tcp_server_receive_event( game_state );
+            network_process_tcp_server_send_event( game_state );
+            
+            vTaskDelay( pdMS_TO_TICKS( 10 ) );
+        }
+        xEventGroupClearBits( network_event_group, NETWORK_CONNECTED );
+
         if ( server_sock != -1) 
         {
             ESP_LOGE( TAG, "Shutting down socket and restarting...");
